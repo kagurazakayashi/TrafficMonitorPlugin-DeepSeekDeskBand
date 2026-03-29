@@ -11,11 +11,14 @@
  * @class CDeepSeekDeskBandItem
  * @brief DeepSeekDeskBand 显示项目类
  * @details 实现 IPluginItem 接口，在 TrafficMonitor 任务栏或主窗口中显示一个项目。
- *          当前为空白插件，仅显示 "DeepSeekDeskBand" 文本。
+ *          左侧显示标签 "DeepSeek"，右侧显示数值文本。
  ****************************************************************************/
 class CDeepSeekDeskBandItem : public IPluginItem
 {
 public:
+    /** @brief 构造函数，初始化默认显示文本 */
+    CDeepSeekDeskBandItem();
+
     /** @brief 获取显示项目的名称，显示在右键菜单的"显示项目"子菜单下 */
     virtual const wchar_t* GetItemName() const override;
 
@@ -30,6 +33,19 @@ public:
 
     /** @brief 获取项目数值的示例文本，用于计算显示区域宽度 */
     virtual const wchar_t* GetItemValueSampleText() const override;
+
+    /** @brief 由插件主类调用，设置要显示的数值文本内容 */
+    void SetValueText(const wchar_t* text);
+
+private:
+    /** @brief 显示标签文本，如 "DeepSeek" */
+    static constexpr const wchar_t* LABEL_TEXT = L"DeepSeek";
+
+    /** @brief 示例文本，用于宽度计算 */
+    static constexpr const wchar_t* SAMPLE_TEXT = L"9999 tokens";
+
+    /** @brief 当前显示的数值文本缓冲区 */
+    wchar_t m_valueText[64];
 };
 
 /************************************************************************//**
@@ -52,6 +68,9 @@ public:
 
     /** @brief 获取插件信息（名称、描述、作者、版本等） */
     virtual const wchar_t* GetInfo(PluginInfoIndex index) override;
+
+    /** @brief 打开插件的设置对话框 */
+    virtual OptionReturn ShowOptionsDialog(void* hParent) override;
 
 private:
     /** @brief 私有构造函数，防止外部直接创建实例 */

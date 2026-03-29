@@ -5,10 +5,31 @@
  *          的所有接口函数，以及插件导出函数 TMPluginGetInstance()。
  ****************************************************************************/
 #include "DeepSeekDeskBand.h"
+#include "framework.h"
+#include <string.h>
+#include <stdio.h>
 
 // ============================================================
 // CDeepSeekDeskBandItem 实现 —— 显示项目
 // ============================================================
+
+/**
+ * @brief 构造函数，初始化默认显示文本
+ */
+CDeepSeekDeskBandItem::CDeepSeekDeskBandItem()
+{
+    // 初始化数值文本为默认值 "就绪"
+    wcscpy_s(m_valueText, L"就绪");
+}
+
+/**
+ * @brief 设置当前显示的数值文本
+ * @param text 要显示的文本内容（最大 63 个宽字符）
+ */
+void CDeepSeekDeskBandItem::SetValueText(const wchar_t* text)
+{
+    wcscpy_s(m_valueText, text);
+}
 
 /**
  * @brief 获取显示项目名称
@@ -16,7 +37,7 @@
  */
 const wchar_t* CDeepSeekDeskBandItem::GetItemName() const
 {
-    return L"DeepSeekDeskBand";
+    return L"DeepSeek 助手";
 }
 
 /**
@@ -30,11 +51,11 @@ const wchar_t* CDeepSeekDeskBandItem::GetItemId() const
 
 /**
  * @brief 获取标签文本
- * @return 标签文本字符串（当前返回空字符串，不显示标签）
+ * @return 标签文本字符串，显示在数值文本的左侧
  */
 const wchar_t* CDeepSeekDeskBandItem::GetItemLableText() const
 {
-    return L"";
+    return LABEL_TEXT;
 }
 
 /**
@@ -43,7 +64,7 @@ const wchar_t* CDeepSeekDeskBandItem::GetItemLableText() const
  */
 const wchar_t* CDeepSeekDeskBandItem::GetItemValueText() const
 {
-    return L"DeepSeekDeskBand";
+    return m_valueText;
 }
 
 /**
@@ -52,7 +73,7 @@ const wchar_t* CDeepSeekDeskBandItem::GetItemValueText() const
  */
 const wchar_t* CDeepSeekDeskBandItem::GetItemValueSampleText() const
 {
-    return L"DeepSeekDeskBand";
+    return SAMPLE_TEXT;
 }
 
 // ============================================================
@@ -92,11 +113,17 @@ IPluginItem* CDeepSeekDeskBand::GetItem(int index)
 /**
  * @brief 定时数据获取
  * @details 由主程序每隔一定时间调用，在此获取所有显示项目需要的监控数据。
- *          当前为空白插件，无需获取任何数据。
+ *          当前版本以自增计数器作为演示数值。
  */
 void CDeepSeekDeskBand::DataRequired()
 {
-    // 空白插件：此版本暂不获取任何监控数据
+    // 静态计数器，每次调用自增，用于演示数值变化
+    static int counter = 0;
+    counter++;
+
+    wchar_t valueText[64];
+    swprintf_s(valueText, L"%d", counter);
+    m_item.SetValueText(valueText);
 }
 
 /**
@@ -124,6 +151,120 @@ const wchar_t* CDeepSeekDeskBand::GetInfo(PluginInfoIndex index)
         break;
     }
     return L"";
+}
+
+// ============================================================
+// 设置对话框 —— 空白占位对话框
+// ============================================================
+
+/** @brief 设置对话框窗口类名 */
+static const wchar_t* SETTINGS_DIALOG_CLASS = L"DeepSeekDeskBandSettingsDlg";
+
+/** @brief 控件 ID */
+enum { IDC_BTN_OK = 1001 };
+
+/**
+ * @brief 设置对话框窗口过程
+ */
+static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+    case WM_CREATE:
+    {
+        HINSTANCE hInst = (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE);
+        // 创建静态文本标签
+        CreateWindowW(L"STATIC", L"你好",
+            WS_CHILD | WS_VISIBLE | SS_CENTER,
+            30, 25, 270, 24,
+            hWnd, nullptr, hInst, nullptr);
+        // 创建"确定"按钮
+        CreateWindowW(L"BUTTON", L"确定",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            130, 90, 80, 26,
+            hWnd, (HMENU)IDC_BTN_OK, hInst, nullptr);
+        break;
+    }
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDC_BTN_OK)
+        {
+            DestroyWindow(hWnd);
+        }
+        break;
+    case WM_CLOSE:
+        DestroyWindow(hWnd);
+        break;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+    default:
+        return DefWindowProc(hWnd, msg, wParam, lParam);
+    }
+    return 0;
+}
+
+/**
+ * @brief 打开插件的设置对话框
+ * @param hParent 父窗口句柄
+ * @return OR_OPTION_CHANGED
+ */
+ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
+{
+    HINSTANCE hInst = GetModuleHandle(nullptr);
+
+    // 注册窗口类（仅首次注册）
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(WNDCLASSEXW);
+    wc.lpfnWndProc = SettingsDlgProc;
+    wc.hInstance = hInst;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.lpszClassName = SETTINGS_DIALOG_CLASS;
+    RegisterClassExW(&wc);
+
+    // 计算居中位置
+    int dlgWidth = 350;
+    int dlgHeight = 170;
+    int x = CW_USEDEFAULT;
+    int y = CW_USEDEFAULT;
+    HWND hParentWnd = (HWND)hParent;
+    if (hParentWnd)
+    {
+        RECT parentRect;
+        GetWindowRect(hParentWnd, &parentRect);
+        x = parentRect.left + ((parentRect.right - parentRect.left) - dlgWidth) / 2;
+        y = parentRect.top + ((parentRect.bottom - parentRect.top) - dlgHeight) / 2;
+    }
+
+    // 创建对话框窗口
+    HWND hDlg = CreateWindowExW(
+        0, SETTINGS_DIALOG_CLASS, L"DeepSeek 设置",
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+        x, y, dlgWidth, dlgHeight,
+        hParentWnd, nullptr, hInst, nullptr);
+
+    if (!hDlg)
+        return OR_OPTION_NOT_PROVIDED;
+
+    // 禁用父窗口以实现模态效果
+    if (hParentWnd)
+        EnableWindow(hParentWnd, FALSE);
+
+    ShowWindow(hDlg, SW_SHOW);
+
+    // 模态消息循环
+    MSG msg;
+    while (GetMessage(&msg, nullptr, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    // 恢复父窗口
+    if (hParentWnd)
+        EnableWindow(hParentWnd, TRUE);
+
+    return OR_OPTION_CHANGED;
 }
 
 // ============================================================
