@@ -6,6 +6,7 @@
  ****************************************************************************/
 #pragma once
 #include "PluginInterface.h"
+#include <string>
 
 /************************************************************************//**
  * @class CDeepSeekDeskBandItem
@@ -72,6 +73,9 @@ public:
     /** @brief 打开插件的设置对话框 */
     virtual OptionReturn ShowOptionsDialog(void* hParent) override;
 
+    /** @brief 插件初始化，获取主程序接口指针，加载配置 */
+    virtual void OnInitialize(ITrafficMonitor* pApp) override;
+
 private:
     /** @brief 私有构造函数，防止外部直接创建实例 */
     CDeepSeekDeskBand();
@@ -81,6 +85,24 @@ private:
 
     /** @brief 插件提供的显示项目对象（当前仅一个） */
     CDeepSeekDeskBandItem m_item;
+
+    /** @brief 主程序接口指针，用于获取配置目录等信息 */
+    ITrafficMonitor* m_pApp = nullptr;
+
+    /** @brief DeepSeek API 密钥缓冲区 */
+    wchar_t m_apiKey[128] = {};
+
+    /** @brief 更新间隔，单位秒 */
+    int m_updateInterval = 60;
+
+    /** @brief 获取配置文件完整路径 */
+    std::wstring GetConfigFilePath();
+
+    /** @brief 从配置文件加载设置 */
+    void LoadConfig();
+
+    /** @brief 保存设置到配置文件 */
+    void SaveConfig();
 };
 
 #ifdef __cplusplus

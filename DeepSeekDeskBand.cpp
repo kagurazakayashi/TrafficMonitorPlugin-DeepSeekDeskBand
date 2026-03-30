@@ -8,6 +8,9 @@
 #include "framework.h"
 #include <string.h>
 #include <stdio.h>
+#include <string>
+#include <CommCtrl.h>
+#pragma comment(lib, "comctl32.lib")
 
 // ============================================================
 // CDeepSeekDeskBandItem 实现 —— 显示项目
@@ -85,7 +88,10 @@ CDeepSeekDeskBand CDeepSeekDeskBand::m_instance;
 
 /** @brief 私有构造函数 */
 CDeepSeekDeskBand::CDeepSeekDeskBand()
+    : m_pApp(nullptr)
+    , m_updateInterval(60)
 {
+    m_apiKey[0] = L'\0';
 }
 
 /**
@@ -154,49 +160,413 @@ const wchar_t* CDeepSeekDeskBand::GetInfo(PluginInfoIndex index)
 }
 
 // ============================================================
-// 设置对话框 —— 空白占位对话框
+// 配置管理 —— 从 INI 文件加载 / 保存
+// ============================================================
+
+/**
+ * @brief 获取配置文件完整路径
+ * @return 配置文件路径字符串
+ */
+std::wstring CDeepSeekDeskBand::GetConfigFilePath()
+{
+    if (m_pApp)
+        return std::wstring(m_pApp->GetPluginConfigDir()) + L"\\DeepSeekDeskBand.ini";
+    return L"";     // 无法获取配置目录时返回空
+}
+
+/**
+ * @brief 从配置文件加载设置
+ * @note  配置节名："Settings"
+ *        键："DeepSeekAPIKey"、"UpdateInterval"
+ */
+void CDeepSeekDeskBand::LoadConfig()
+{
+    std::wstring configPath = GetConfigFilePath();
+    if (configPath.empty())
+        return;
+
+    // 加载 API 密钥
+    GetPrivateProfileStringW(
+        L"Settings",                // 配置节
+        L"DeepSeekAPIKey",          // 键名
+        L"",                        // 默认值（空字符串）
+        m_apiKey,                   // 输出缓冲区
+        128,                        // 缓冲区大小
+        configPath.c_str());        // INI 文件路径
+
+    // 加载更新间隔
+    m_updateInterval = GetPrivateProfileIntW(
+        L"Settings",
+        L"UpdateInterval",
+        60,                          // 默认值 60 秒
+        configPath.c_str());
+}
+
+/**
+ * @brief 保存设置到配置文件
+ * @note  自动创建目标目录（如需要）
+ */
+void CDeepSeekDeskBand::SaveConfig()
+{
+    std::wstring configPath = GetConfigFilePath();
+    if (configPath.empty())
+        return;
+
+    // 写入 API 密钥
+    WritePrivateProfileStringW(
+        L"Settings",
+        L"DeepSeekAPIKey",
+        m_apiKey,
+        configPath.c_str());
+
+    // 写入更新间隔
+    WritePrivateProfileStringW(
+        L"Settings",
+        L"UpdateInterval",
+        std::to_wstring(m_updateInterval).c_str(),
+        configPath.c_str());
+}
+
+/**
+ * @brief 插件初始化回调
+ * @param pApp 主程序 ITrafficMonitor 接口指针
+ * @details 保存主程序指针，加载配置文件
+ */
+void CDeepSeekDeskBand::OnInitialize(ITrafficMonitor* pApp)
+{
+    m_pApp = pApp;
+    LoadConfig();
+}
+
+// ============================================================
+// 设置对话框
 // ============================================================
 
 /** @brief 设置对话框窗口类名 */
 static const wchar_t* SETTINGS_DIALOG_CLASS = L"DeepSeekDeskBandSettingsDlg";
 
-/** @brief 控件 ID */
-enum { IDC_BTN_OK = 1001 };
+/** @brief 对话框控件 ID */
+enum
+{
+    IDC_EDIT_API_KEY    = 1001,   // DeepSeek API 输入框
+    IDC_STATIC_API_HINT = 1002,   // API 格式提示
+    IDC_BTN_TEST_API    = 1003,   // 测试API 按钮
+    IDC_STATIC_STATUS   = 1004,   // 测试结果状态文本
+    IDC_EDIT_INTERVAL   = 1005,   // 更新间隔输入框
+    IDC_SPIN_INTERVAL   = 1006,   // 更新间隔 UpDown 控件
+    IDC_BTN_OK          = 1007,   // 确定按钮
+    IDC_BTN_CANCEL      = 1008,   // 取消按钮
+};
+
+/**
+ * @brief 设置对话框数据
+ * @details 在创建对话框前分配，通过 CreateWindowExW 的 lpParam 传递给
+ *          WM_CREATE 消息，窗口过程通过 GWLP_USERDATA 存取。
+ */
+struct SettingsDlgData
+{
+    wchar_t apiKey[128];         // 当前输入的 API 密钥
+    wchar_t apiKeyOrig[128];     // 原始 API 密钥（用于取消时还原）
+    int     updateInterval;      // 当前输入的更新间隔
+    int     updateIntervalOrig;  // 原始更新间隔
+    bool    changed;             // 是否有未保存的变更
+    bool    apiTested;           // API 是否已通过测试
+};
+
+/**
+ * @brief 校验 DeepSeek API 密钥格式
+ * @param key 待校验的密钥字符串
+ * @return 格式正确返回 true
+ * @note  有效格式：sk- 开头 + 恰好 32 位小写字母和数字 [a-z0-9]
+ */
+static bool IsValidApiKey(const wchar_t* key)
+{
+    if (!key || wcsncmp(key, L"sk-", 3) != 0)
+        return false;
+
+    const wchar_t* p = key + 3;
+    int len = 0;
+    while (*p)
+    {
+        if (!((*p >= L'a' && *p <= L'z') || (*p >= L'0' && *p <= L'9')))
+            return false;
+        p++;
+        len++;
+    }
+
+    return (len == 32);
+}
+
+/**
+ * @brief 更新控件启用状态（由 API 密钥有效性和测试状态决定）
+ * @param hDlg   对话框句柄
+ * @param valid  API 密钥格式是否有效
+ * @param tested API 是否已通过测试
+ */
+static void UpdateApiDependentControls(HWND hDlg, bool valid, bool tested)
+{
+    ShowWindow(GetDlgItem(hDlg, IDC_STATIC_API_HINT), valid ? SW_HIDE : SW_SHOW);
+    EnableWindow(GetDlgItem(hDlg, IDC_BTN_TEST_API), valid);
+    EnableWindow(GetDlgItem(hDlg, IDC_BTN_OK), valid && tested);
+}
 
 /**
  * @brief 设置对话框窗口过程
  */
 static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    SettingsDlgData* pData = (SettingsDlgData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
     switch (msg)
     {
     case WM_CREATE:
     {
         HINSTANCE hInst = (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE);
-        // 创建静态文本标签
-        CreateWindowW(L"STATIC", L"你好",
-            WS_CHILD | WS_VISIBLE | SS_CENTER,
-            30, 25, 270, 24,
+
+        // 从 CREATESTRUCT 中取出对话框数据
+        CREATESTRUCT* pCreate = (CREATESTRUCT*)lParam;
+        pData = (SettingsDlgData*)pCreate->lpCreateParams;
+        SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)pData);
+
+        // ---- 创建系统消息字体（Segoe UI 9pt，现代外观） ----
+        NONCLIENTMETRICSW ncm = { sizeof(NONCLIENTMETRICSW) };
+        SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+        ncm.lfMessageFont.lfHeight = -12;      // 9pt 高度
+        ncm.lfMessageFont.lfWeight = FW_NORMAL;
+        HFONT hFont = CreateFontIndirectW(&ncm.lfMessageFont);
+        SetPropW(hWnd, L"hFont", hFont);       // 存储以便在 WM_DESTROY 释放
+
+        HWND hChild;
+
+        // --- "DeepSeek API:" 标签 ---
+        hChild = CreateWindowW(L"STATIC", L"DeepSeek API:",
+            WS_CHILD | WS_VISIBLE | SS_RIGHT,
+            20, 22, 110, 20,
             hWnd, nullptr, hInst, nullptr);
-        // 创建"确定"按钮
-        CreateWindowW(L"BUTTON", L"确定",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            130, 90, 80, 26,
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- API 密钥输入框（密码掩码，宽度足够容纳 35 字符） ---
+        hChild = CreateWindowW(L"EDIT", pData->apiKey,
+            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP,
+            135, 19, 375, 22,
+            hWnd, (HMENU)IDC_EDIT_API_KEY, hInst, nullptr);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- API 格式校验提示（默认隐藏） ---
+        hChild = CreateWindowW(L"STATIC", L"密钥格式错误：必须以 sk- 开头，后跟32位小写字母和数字",
+            WS_CHILD | SS_LEFT,
+            135, 44, 375, 16,
+            hWnd, (HMENU)IDC_STATIC_API_HINT, hInst, nullptr);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- "测试API(&T)" 按钮 ---
+        hChild = CreateWindowW(L"BUTTON", L"测试API(&T)",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
+            135, 74, 90, 24,
+            hWnd, (HMENU)IDC_BTN_TEST_API, hInst, nullptr);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- 测试结果状态文本 ---
+        hChild = CreateWindowW(L"STATIC", L"",
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            235, 77, 280, 20,
+            hWnd, (HMENU)IDC_STATIC_STATUS, hInst, nullptr);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- "更新间隔（秒）:" 标签 ---
+        hChild = CreateWindowW(L"STATIC", L"更新间隔（秒）:",
+            WS_CHILD | WS_VISIBLE | SS_RIGHT,
+            20, 124, 110, 20,
+            hWnd, nullptr, hInst, nullptr);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- 更新间隔输入框（Spin 控件的伙伴编辑框） ---
+        wchar_t bufInterval[16];
+        swprintf_s(bufInterval, L"%d", pData->updateInterval);
+        hChild = CreateWindowW(L"EDIT", bufInterval,
+            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
+            135, 121, 100, 22,
+            hWnd, (HMENU)IDC_EDIT_INTERVAL, hInst, nullptr);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- UpDown Spin 控件（自动与伙伴编辑框对齐，范围 1~31,536,000） ---
+        hChild = CreateWindowW(UPDOWN_CLASSW, nullptr,
+            WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_SETBUDDYINT,
+            0, 0, 0, 0,
+            hWnd, (HMENU)IDC_SPIN_INTERVAL, hInst, nullptr);
+        SendMessageW(hChild, UDM_SETRANGE32, 1, 31536000);   // 最短 1 秒，最长 1 年
+        SendMessageW(hChild, UDM_SETPOS32, 0, pData->updateInterval);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- "确定(&O)" 按钮（默认不可用） ---
+        hChild = CreateWindowW(L"BUTTON", L"确定(&O)",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED | WS_TABSTOP,
+            340, 375, 85, 28,
             hWnd, (HMENU)IDC_BTN_OK, hInst, nullptr);
-        break;
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- "取消(&C)" 按钮 ---
+        hChild = CreateWindowW(L"BUTTON", L"取消(&C)",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
+            435, 375, 85, 28,
+            hWnd, (HMENU)IDC_BTN_CANCEL, hInst, nullptr);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // ---- 初始状态：校验已加载的 API 密钥 ----
+        pData->apiTested = false;
+        bool valid = IsValidApiKey(pData->apiKey);
+        EnableWindow(GetDlgItem(hWnd, IDC_BTN_TEST_API), valid);
+        ShowWindow(GetDlgItem(hWnd, IDC_STATIC_API_HINT),
+            (pData->apiKey[0] == L'\0') ? SW_HIDE : (valid ? SW_HIDE : SW_SHOW));
+
+        SetFocus(GetDlgItem(hWnd, IDC_EDIT_API_KEY));
+        return 0;
     }
-    case WM_COMMAND:
-        if (LOWORD(wParam) == IDC_BTN_OK)
+
+    case WM_CTLCOLORSTATIC:
+    {
+        // 仅对"密钥格式错误"提示设置红色文字，不干预背景色
+        HWND hCtrl = (HWND)lParam;
+        if (hCtrl == GetDlgItem(hWnd, IDC_STATIC_API_HINT))
         {
-            DestroyWindow(hWnd);
+            HDC hdcStatic = (HDC)wParam;
+            SetTextColor(hdcStatic, RGB(0xE0, 0x10, 0x10));
+            SetBkMode(hdcStatic, TRANSPARENT);
+            return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
         }
         break;
+    }
+
+    case WM_COMMAND:
+    {
+        WORD id = LOWORD(wParam);
+        WORD code = HIWORD(wParam);
+
+        switch (id)
+        {
+        case IDC_EDIT_API_KEY:
+            if (code == EN_CHANGE && pData)
+            {
+                pData->changed = true;
+                pData->apiTested = false;   // API 内容变更后需重新测试
+
+                wchar_t buf[128];
+                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, buf, 128);
+                bool valid = IsValidApiKey(buf);
+                UpdateApiDependentControls(hWnd, valid, pData->apiTested);
+            }
+            break;
+
+        case IDC_EDIT_INTERVAL:
+            if (code == EN_CHANGE && pData)
+            {
+                pData->changed = true;
+
+                wchar_t buf[128];
+                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, buf, 128);
+                bool apiValid = IsValidApiKey(buf);
+                EnableWindow(GetDlgItem(hWnd, IDC_BTN_OK), apiValid && pData->apiTested);
+            }
+            break;
+
+        case IDC_BTN_TEST_API:
+            if (pData)
+            {
+                // TODO: 实际调用 DeepSeek API 验证密钥有效性
+                // 当前版本默认测试成功，后续接入真实 API 调用
+                pData->apiTested = true;
+                SetDlgItemTextW(hWnd, IDC_STATIC_STATUS, L"API 测试通过（占位）");
+
+                wchar_t buf[128];
+                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, buf, 128);
+                bool valid = IsValidApiKey(buf);
+                UpdateApiDependentControls(hWnd, valid, pData->apiTested);
+            }
+            break;
+
+        case IDC_BTN_OK:
+            if (pData)
+            {
+                // 从编辑框读取当前输入
+                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, pData->apiKey, 128);
+
+                // 保存前二次校验（防御性编程）
+                if (!IsValidApiKey(pData->apiKey))
+                {
+                    MessageBoxW(hWnd, L"API 密钥格式无效，请检查后重试。",
+                        L"格式错误", MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+
+                wchar_t bufInterval[16];
+                GetDlgItemTextW(hWnd, IDC_EDIT_INTERVAL, bufInterval, 16);
+                pData->updateInterval = _wtoi(bufInterval);
+                if (pData->updateInterval < 1)
+                    pData->updateInterval = 1;
+            }
+            DestroyWindow(hWnd);
+            break;
+
+        case IDC_BTN_CANCEL:
+            if (pData)
+            {
+                // 还原原始值
+                wcscpy_s(pData->apiKey, pData->apiKeyOrig);
+                pData->updateInterval = pData->updateIntervalOrig;
+                pData->changed = false;
+            }
+            DestroyWindow(hWnd);
+            break;
+        }
+        break;
+    }
+
+    case WM_KEYDOWN:
+    {
+        switch (wParam)
+        {
+        case VK_RETURN:
+            // 按回车触发确定按钮（仅当确定可用时）
+            if (pData && IsWindowEnabled(GetDlgItem(hWnd, IDC_BTN_OK)))
+            {
+                SendMessageW(hWnd, WM_COMMAND, MAKEWPARAM(IDC_BTN_OK, BN_CLICKED),
+                    (LPARAM)GetDlgItem(hWnd, IDC_BTN_OK));
+            }
+            break;
+
+        case VK_ESCAPE:
+            // 按 Esc 触发取消按钮
+            SendMessageW(hWnd, WM_COMMAND, MAKEWPARAM(IDC_BTN_CANCEL, BN_CLICKED),
+                (LPARAM)GetDlgItem(hWnd, IDC_BTN_CANCEL));
+            break;
+
+        default:
+            return DefWindowProc(hWnd, msg, wParam, lParam);
+        }
+        break;
+    }
+
     case WM_CLOSE:
+        if (pData)
+        {
+            // 点击标题栏关闭 → 取消操作
+            wcscpy_s(pData->apiKey, pData->apiKeyOrig);
+            pData->updateInterval = pData->updateIntervalOrig;
+            pData->changed = false;
+        }
         DestroyWindow(hWnd);
         break;
+
     case WM_DESTROY:
+    {
+        // 释放字体资源
+        HFONT hFont = (HFONT)RemovePropW(hWnd, L"hFont");
+        if (hFont)
+            DeleteObject(hFont);
         PostQuitMessage(0);
         break;
+    }
+
     default:
         return DefWindowProc(hWnd, msg, wParam, lParam);
     }
@@ -206,13 +576,13 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 /**
  * @brief 打开插件的设置对话框
  * @param hParent 父窗口句柄
- * @return OR_OPTION_CHANGED
+ * @return 设置变更时返回 OR_OPTION_CHANGED，否则返回 OR_OPTION_UNCHANGED
  */
 ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
 {
     HINSTANCE hInst = GetModuleHandle(nullptr);
 
-    // 注册窗口类（仅首次注册）
+    // 注册窗口类（仅首次注册成功，后续同名注册静默忽略）
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(WNDCLASSEXW);
     wc.lpfnWndProc = SettingsDlgProc;
@@ -222,9 +592,17 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
     wc.lpszClassName = SETTINGS_DIALOG_CLASS;
     RegisterClassExW(&wc);
 
+    // ---- 准备对话框数据 ----
+    SettingsDlgData dlgData;
+    wcscpy_s(dlgData.apiKey, m_apiKey);
+    wcscpy_s(dlgData.apiKeyOrig, m_apiKey);
+    dlgData.updateInterval = m_updateInterval;
+    dlgData.updateIntervalOrig = m_updateInterval;
+    dlgData.changed = false;
+
     // 计算居中位置
-    int dlgWidth = 350;
-    int dlgHeight = 170;
+    int dlgWidth = 560;
+    int dlgHeight = 480;
     int x = CW_USEDEFAULT;
     int y = CW_USEDEFAULT;
     HWND hParentWnd = (HWND)hParent;
@@ -236,12 +614,12 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
         y = parentRect.top + ((parentRect.bottom - parentRect.top) - dlgHeight) / 2;
     }
 
-    // 创建对话框窗口
+    // 创建对话框窗口（WS_EX_CLIENTEDGE 提供现代凹陷边框）
     HWND hDlg = CreateWindowExW(
-        0, SETTINGS_DIALOG_CLASS, L"DeepSeek 设置",
+        WS_EX_CLIENTEDGE, SETTINGS_DIALOG_CLASS, L"DeepSeek 设置",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
         x, y, dlgWidth, dlgHeight,
-        hParentWnd, nullptr, hInst, nullptr);
+        hParentWnd, nullptr, hInst, &dlgData);
 
     if (!hDlg)
         return OR_OPTION_NOT_PROVIDED;
@@ -264,7 +642,15 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
     if (hParentWnd)
         EnableWindow(hParentWnd, TRUE);
 
-    return OR_OPTION_CHANGED;
+    // ---- 对话框关闭后，根据变更标志决定是否保存 ----
+    if (dlgData.changed)
+    {
+        wcscpy_s(m_apiKey, dlgData.apiKey);
+        m_updateInterval = dlgData.updateInterval;
+        SaveConfig();
+        return OR_OPTION_CHANGED;
+    }
+    return OR_OPTION_UNCHANGED;
 }
 
 // ============================================================
