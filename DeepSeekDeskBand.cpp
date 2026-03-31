@@ -5,6 +5,7 @@
  *          的所有接口函数，以及插件导出函数 TMPluginGetInstance()。
  ****************************************************************************/
 #include "DeepSeekDeskBand.h"
+#include "HttpClient.h"
 #include "framework.h"
 #include <string.h>
 #include <stdio.h>
@@ -89,7 +90,8 @@ CDeepSeekDeskBand CDeepSeekDeskBand::m_instance;
 /** @brief 私有构造函数 */
 CDeepSeekDeskBand::CDeepSeekDeskBand()
     : m_pApp(nullptr)
-    , m_updateInterval(60)
+    , m_updateInterval(DSDB_DEFAULT_INTERVAL)
+    , m_requestTimeout(DSDB_DEFAULT_TIMEOUT)
 {
     m_apiKey[0] = L'\0';
 }
@@ -127,7 +129,7 @@ void CDeepSeekDeskBand::DataRequired()
     static int counter = 0;
     counter++;
 
-    wchar_t valueText[64];
+    wchar_t valueText[DSDB_BUF_VALUE];
     swprintf_s(valueText, L"%d", counter);
     m_item.SetValueText(valueText);
 }
@@ -142,15 +144,15 @@ const wchar_t* CDeepSeekDeskBand::GetInfo(PluginInfoIndex index)
     switch (index)
     {
     case TMI_NAME:          // 插件名称
-        return L"DeepSeekDeskBand";
+        return DSDB_NAME;
     case TMI_DESCRIPTION:   // 插件功能描述
-        return L"DeepSeek 桌面助手插件";
+        return DSDB_DESCRIPTION;
     case TMI_AUTHOR:        // 作者
-        return L"yashi";
+        return DSDB_AUTHOR;
     case TMI_COPYRIGHT:     // 版权信息
         return L"";
     case TMI_VERSION:       // 版本号
-        return L"1.0";
+        return DSDB_VERSION;
     case TMI_URL:           // 项目主页
         return L"";
     default:
@@ -170,7 +172,7 @@ const wchar_t* CDeepSeekDeskBand::GetInfo(PluginInfoIndex index)
 std::wstring CDeepSeekDeskBand::GetConfigFilePath()
 {
     if (m_pApp)
-        return std::wstring(m_pApp->GetPluginConfigDir()) + L"\\DeepSeekDeskBand.ini";
+        return std::wstring(m_pApp->GetPluginConfigDir()) + L"\\" DSDB_CONFIG_FILENAME;
     return L"";     // 无法获取配置目录时返回空
 }
 
@@ -187,19 +189,31 @@ void CDeepSeekDeskBand::LoadConfig()
 
     // 加载 API 密钥
     GetPrivateProfileStringW(
-        L"Settings",                // 配置节
-        L"DeepSeekAPIKey",          // 键名
+        DSDB_CONFIG_SECTION,        // 配置节
+        DSDB_CONFIG_KEY_APIKEY,     // 键名
         L"",                        // 默认值（空字符串）
         m_apiKey,                   // 输出缓冲区
-        128,                        // 缓冲区大小
+        DSDB_BUF_APIKEY,            // 缓冲区大小
         configPath.c_str());        // INI 文件路径
 
     // 加载更新间隔
     m_updateInterval = GetPrivateProfileIntW(
-        L"Settings",
-        L"UpdateInterval",
-        60,                          // 默认值 60 秒
+        DSDB_CONFIG_SECTION,
+        DSDB_CONFIG_KEY_INTERVAL,
+        DSDB_DEFAULT_INTERVAL,      // 默认值
         configPath.c_str());
+
+    // 加载请求超时时间
+    m_requestTimeout = GetPrivateProfileIntW(
+        DSDB_CONFIG_SECTION,
+        DSDB_CONFIG_KEY_TIMEOUT,
+        DSDB_DEFAULT_TIMEOUT,       // 默认值
+        configPath.c_str());
+    // 钳制范围
+    if (m_requestTimeout < DSDB_TIMEOUT_MIN)
+        m_requestTimeout = DSDB_TIMEOUT_MIN;
+    if (m_requestTimeout > DSDB_TIMEOUT_MAX)
+        m_requestTimeout = DSDB_TIMEOUT_MAX;
 }
 
 /**
@@ -214,16 +228,23 @@ void CDeepSeekDeskBand::SaveConfig()
 
     // 写入 API 密钥
     WritePrivateProfileStringW(
-        L"Settings",
-        L"DeepSeekAPIKey",
+        DSDB_CONFIG_SECTION,
+        DSDB_CONFIG_KEY_APIKEY,
         m_apiKey,
         configPath.c_str());
 
     // 写入更新间隔
     WritePrivateProfileStringW(
-        L"Settings",
-        L"UpdateInterval",
+        DSDB_CONFIG_SECTION,
+        DSDB_CONFIG_KEY_INTERVAL,
         std::to_wstring(m_updateInterval).c_str(),
+        configPath.c_str());
+
+    // 写入请求超时时间
+    WritePrivateProfileStringW(
+        DSDB_CONFIG_SECTION,
+        DSDB_CONFIG_KEY_TIMEOUT,
+        std::to_wstring(m_requestTimeout).c_str(),
         configPath.c_str());
 }
 
@@ -256,6 +277,8 @@ enum
     IDC_SPIN_INTERVAL   = 1006,   // 更新间隔 UpDown 控件
     IDC_BTN_OK          = 1007,   // 确定按钮
     IDC_BTN_CANCEL      = 1008,   // 取消按钮
+    IDC_EDIT_TIMEOUT    = 1009,   // 请求超时输入框
+    IDC_SPIN_TIMEOUT    = 1010,   // 请求超时 UpDown 控件
 };
 
 /**
@@ -265,12 +288,14 @@ enum
  */
 struct SettingsDlgData
 {
-    wchar_t apiKey[128];         // 当前输入的 API 密钥
-    wchar_t apiKeyOrig[128];     // 原始 API 密钥（用于取消时还原）
-    int     updateInterval;      // 当前输入的更新间隔
-    int     updateIntervalOrig;  // 原始更新间隔
-    bool    changed;             // 是否有未保存的变更
-    bool    apiTested;           // API 是否已通过测试
+    wchar_t apiKey[DSDB_BUF_APIKEY];              // 当前输入的 API 密钥
+    wchar_t apiKeyOrig[DSDB_BUF_APIKEY];          // 原始 API 密钥（用于取消时还原）
+    int     updateInterval;           // 当前输入的更新间隔
+    int     updateIntervalOrig;       // 原始更新间隔
+    int     requestTimeout;           // 当前输入的请求超时时间
+    int     requestTimeoutOrig;       // 原始请求超时时间
+    bool    changed;                  // 是否有未保存的变更
+    bool    apiTested;                // API 是否已通过测试
 };
 
 /**
@@ -281,10 +306,11 @@ struct SettingsDlgData
  */
 static bool IsValidApiKey(const wchar_t* key)
 {
-    if (!key || wcsncmp(key, L"sk-", 3) != 0)
+    size_t prefixLen = wcslen(DSDB_APIKEY_PREFIX);
+    if (!key || wcsncmp(key, DSDB_APIKEY_PREFIX, prefixLen) != 0)
         return false;
 
-    const wchar_t* p = key + 3;
+    const wchar_t* p = key + prefixLen;
     int len = 0;
     while (*p)
     {
@@ -294,20 +320,24 @@ static bool IsValidApiKey(const wchar_t* key)
         len++;
     }
 
-    return (len == 32);
+    return (len == DSDB_APIKEY_SUFFIX_LEN);
 }
 
 /**
  * @brief 更新控件启用状态（由 API 密钥有效性和测试状态决定）
- * @param hDlg   对话框句柄
- * @param valid  API 密钥格式是否有效
- * @param tested API 是否已通过测试
+ * @param hDlg       对话框句柄
+ * @param hasContent 输入框是否非空（空时不显示格式错误提示）
+ * @param valid      API 密钥格式是否有效
+ * @param tested     API 是否已通过测试
  */
-static void UpdateApiDependentControls(HWND hDlg, bool valid, bool tested)
+static void UpdateApiDependentControls(HWND hDlg, bool hasContent, bool valid, bool tested)
 {
-    ShowWindow(GetDlgItem(hDlg, IDC_STATIC_API_HINT), valid ? SW_HIDE : SW_SHOW);
-    EnableWindow(GetDlgItem(hDlg, IDC_BTN_TEST_API), valid);
-    EnableWindow(GetDlgItem(hDlg, IDC_BTN_OK), valid && tested);
+    // 仅当有输入且格式无效时显示提示；空输入或有效输入不显示
+    ShowWindow(GetDlgItem(hDlg, IDC_STATIC_API_HINT), (hasContent && !valid) ? SW_SHOW : SW_HIDE);
+    // 测试按钮：仅当密钥非空且格式有效时可用
+    EnableWindow(GetDlgItem(hDlg, IDC_BTN_TEST_API), hasContent && valid);
+    // 确定按钮：密钥为空或已通过测试的有效密钥时可保存
+    EnableWindow(GetDlgItem(hDlg, IDC_BTN_OK), !hasContent || (valid && tested));
 }
 
 /**
@@ -381,7 +411,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 更新间隔输入框（Spin 控件的伙伴编辑框） ---
-        wchar_t bufInterval[16];
+        wchar_t bufInterval[DSDB_BUF_NUMBER];
         swprintf_s(bufInterval, L"%d", pData->updateInterval);
         hChild = CreateWindowW(L"EDIT", bufInterval,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
@@ -394,9 +424,36 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_SETBUDDYINT,
             0, 0, 0, 0,
             hWnd, (HMENU)IDC_SPIN_INTERVAL, hInst, nullptr);
-        SendMessageW(hChild, UDM_SETRANGE32, 1, 31536000);   // 最短 1 秒，最长 1 年
+            SendMessageW(hChild, UDM_SETRANGE32, DSDB_INTERVAL_MIN, DSDB_INTERVAL_MAX);   // 范围
         SendMessageW(hChild, UDM_SETPOS32, 0, pData->updateInterval);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- "请求超时（秒）:" 标签 ---
+        hChild = CreateWindowW(L"STATIC", L"请求超时（秒）:",
+            WS_CHILD | WS_VISIBLE | SS_RIGHT,
+            20, 174, 110, 20,
+            hWnd, nullptr, hInst, nullptr);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- 请求超时输入框（Spin 控件的伙伴编辑框） ---
+        wchar_t bufTimeout[DSDB_BUF_NUMBER];
+        swprintf_s(bufTimeout, L"%d", pData->requestTimeout);
+        hChild = CreateWindowW(L"EDIT", bufTimeout,
+            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
+            135, 171, 100, 22,
+            hWnd, (HMENU)IDC_EDIT_TIMEOUT, hInst, nullptr);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // --- 超时 UpDown Spin 控件（范围 3~60 秒） ---
+        {
+            HWND hSpin = CreateWindowW(UPDOWN_CLASSW, nullptr,
+                WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_SETBUDDYINT,
+                0, 0, 0, 0,
+                hWnd, (HMENU)IDC_SPIN_TIMEOUT, hInst, nullptr);
+            SendMessageW(hSpin, UDM_SETRANGE32, DSDB_TIMEOUT_MIN, DSDB_TIMEOUT_MAX);
+            SendMessageW(hSpin, UDM_SETPOS32, 0, pData->requestTimeout);
+            SendMessageW(hSpin, WM_SETFONT, (WPARAM)hFont, TRUE);
+        }
 
         // --- "确定(&O)" 按钮（默认不可用） ---
         hChild = CreateWindowW(L"BUTTON", L"确定(&O)",
@@ -413,11 +470,13 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // ---- 初始状态：校验已加载的 API 密钥 ----
-        pData->apiTested = false;
-        bool valid = IsValidApiKey(pData->apiKey);
-        EnableWindow(GetDlgItem(hWnd, IDC_BTN_TEST_API), valid);
-        ShowWindow(GetDlgItem(hWnd, IDC_STATIC_API_HINT),
-            (pData->apiKey[0] == L'\0') ? SW_HIDE : (valid ? SW_HIDE : SW_SHOW));
+        // 若已保存有效密钥（必然通过过测试），视为已测试
+        pData->apiTested = IsValidApiKey(pData->apiKey);
+        {
+            bool hasContent = (pData->apiKey[0] != L'\0');
+            bool valid = IsValidApiKey(pData->apiKey);
+            UpdateApiDependentControls(hWnd, hasContent, valid, pData->apiTested);
+        }
 
         SetFocus(GetDlgItem(hWnd, IDC_EDIT_API_KEY));
         return 0;
@@ -450,10 +509,10 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 pData->changed = true;
                 pData->apiTested = false;   // API 内容变更后需重新测试
 
-                wchar_t buf[128];
-                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, buf, 128);
+                wchar_t buf[DSDB_BUF_APIKEY];
+                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, buf, DSDB_BUF_APIKEY);
                 bool valid = IsValidApiKey(buf);
-                UpdateApiDependentControls(hWnd, valid, pData->apiTested);
+                UpdateApiDependentControls(hWnd, buf[0] != L'\0', valid, pData->apiTested);
             }
             break;
 
@@ -462,25 +521,93 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             {
                 pData->changed = true;
 
-                wchar_t buf[128];
-                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, buf, 128);
+                wchar_t buf[DSDB_BUF_APIKEY];
+                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, buf, DSDB_BUF_APIKEY);
                 bool apiValid = IsValidApiKey(buf);
-                EnableWindow(GetDlgItem(hWnd, IDC_BTN_OK), apiValid && pData->apiTested);
+                UpdateApiDependentControls(hWnd, buf[0] != L'\0', apiValid, pData->apiTested);
+            }
+            break;
+
+        case IDC_EDIT_TIMEOUT:
+            if (code == EN_CHANGE && pData)
+            {
+                pData->changed = true;
+
+                wchar_t buf[DSDB_BUF_APIKEY];
+                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, buf, DSDB_BUF_APIKEY);
+                bool apiValid = IsValidApiKey(buf);
+                UpdateApiDependentControls(hWnd, buf[0] != L'\0', apiValid, pData->apiTested);
             }
             break;
 
         case IDC_BTN_TEST_API:
             if (pData)
             {
-                // TODO: 实际调用 DeepSeek API 验证密钥有效性
-                // 当前版本默认测试成功，后续接入真实 API 调用
-                pData->apiTested = true;
-                SetDlgItemTextW(hWnd, IDC_STATIC_STATUS, L"API 测试通过（占位）");
+                // 读取当前输入的 API 密钥
+                wchar_t apiKey[DSDB_BUF_APIKEY];
+                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, apiKey, DSDB_BUF_APIKEY);
 
-                wchar_t buf[128];
-                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, buf, 128);
-                bool valid = IsValidApiKey(buf);
-                UpdateApiDependentControls(hWnd, valid, pData->apiTested);
+                // 禁用按钮，显示"正在测试"状态
+                EnableWindow(GetDlgItem(hWnd, IDC_BTN_TEST_API), FALSE);
+                SetDlgItemTextW(hWnd, IDC_STATIC_STATUS, L"正在测试 API...");
+
+                // 调用网络模块测试 API（阻塞调用，使用当前设置的超时时间）
+                wchar_t bufTimeout[DSDB_BUF_NUMBER];
+                GetDlgItemTextW(hWnd, IDC_EDIT_TIMEOUT, bufTimeout, DSDB_BUF_NUMBER);
+                int timeoutSec = _wtoi(bufTimeout);
+                if (timeoutSec < DSDB_TIMEOUT_MIN) timeoutSec = DSDB_TIMEOUT_MIN;
+                if (timeoutSec > DSDB_TIMEOUT_MAX) timeoutSec = DSDB_TIMEOUT_MAX;
+                ApiTestResult testResult = TestDeepSeekApi(apiKey, timeoutSec);
+
+                if (testResult.success)
+                {
+                    // 测试通过：弹出详情提示框
+                    wchar_t msg[DSDB_BUF_MESSAGE];
+                    swprintf_s(msg,
+                        L"API 测试通过！\n\n"
+                        L"账户可用：%s\n"
+                        L"总余额：%s %s\n"
+                        L"赠送余额：%s %s\n"
+                        L"充值余额：%s %s",
+                        testResult.is_available ? L"是" : L"否",
+                        testResult.total_balance.c_str(),
+                        testResult.currency.c_str(),
+                        testResult.granted_balance.c_str(),
+                        testResult.currency.c_str(),
+                        testResult.topped_up_balance.c_str(),
+                        testResult.currency.c_str());
+                    MessageBoxW(hWnd, msg, L"API 测试成功", MB_OK | MB_ICONINFORMATION);
+
+                    pData->apiTested = true;
+                    SetDlgItemTextW(hWnd, IDC_STATIC_STATUS, L"API 测试通过");
+                }
+                else
+                {
+                    // 测试失败：弹出错误提示框
+                    std::wstring errMsg;
+                    if (!testResult.error_message.empty())
+                        errMsg = testResult.error_message;
+                    else if (testResult.http_status_code != 0)
+                    {
+                        wchar_t statusMsg[DSDB_BUF_STATUS];
+                        swprintf_s(statusMsg, L"HTTP 状态码 %d", testResult.http_status_code);
+                        errMsg = statusMsg;
+                    }
+                    else
+                        errMsg = L"未知错误";
+
+                    wchar_t msg[DSDB_BUF_MESSAGE];
+                    swprintf_s(msg, L"API 测试失败！\n\n错误信息：%s", errMsg.c_str());
+                    MessageBoxW(hWnd, msg, L"API 测试失败", MB_OK | MB_ICONWARNING);
+
+                    pData->apiTested = false;
+                    SetDlgItemTextW(hWnd, IDC_STATIC_STATUS, L"API 测试失败");
+                }
+
+                // 恢复按钮可用状态，更新控件联动
+                EnableWindow(GetDlgItem(hWnd, IDC_BTN_TEST_API), TRUE);
+                bool valid = IsValidApiKey(apiKey);
+                UpdateApiDependentControls(hWnd, apiKey[0] != L'\0', valid, pData->apiTested);
             }
             break;
 
@@ -488,21 +615,29 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             if (pData)
             {
                 // 从编辑框读取当前输入
-                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, pData->apiKey, 128);
+                GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, pData->apiKey, DSDB_BUF_APIKEY);
 
-                // 保存前二次校验（防御性编程）
-                if (!IsValidApiKey(pData->apiKey))
+                // 保存前二次校验（防御性编程，空密钥允许保存）
+                if (pData->apiKey[0] != L'\0' && !IsValidApiKey(pData->apiKey))
                 {
                     MessageBoxW(hWnd, L"API 密钥格式无效，请检查后重试。",
                         L"格式错误", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
 
-                wchar_t bufInterval[16];
-                GetDlgItemTextW(hWnd, IDC_EDIT_INTERVAL, bufInterval, 16);
+                wchar_t bufInterval[DSDB_BUF_NUMBER];
+                GetDlgItemTextW(hWnd, IDC_EDIT_INTERVAL, bufInterval, DSDB_BUF_NUMBER);
                 pData->updateInterval = _wtoi(bufInterval);
-                if (pData->updateInterval < 1)
-                    pData->updateInterval = 1;
+                if (pData->updateInterval < DSDB_INTERVAL_MIN)
+                    pData->updateInterval = DSDB_INTERVAL_MIN;
+
+                wchar_t bufTimeout[DSDB_BUF_NUMBER];
+                GetDlgItemTextW(hWnd, IDC_EDIT_TIMEOUT, bufTimeout, DSDB_BUF_NUMBER);
+                pData->requestTimeout = _wtoi(bufTimeout);
+                if (pData->requestTimeout < DSDB_TIMEOUT_MIN)
+                    pData->requestTimeout = DSDB_TIMEOUT_MIN;
+                if (pData->requestTimeout > DSDB_TIMEOUT_MAX)
+                    pData->requestTimeout = DSDB_TIMEOUT_MAX;
             }
             DestroyWindow(hWnd);
             break;
@@ -513,6 +648,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 // 还原原始值
                 wcscpy_s(pData->apiKey, pData->apiKeyOrig);
                 pData->updateInterval = pData->updateIntervalOrig;
+                pData->requestTimeout = pData->requestTimeoutOrig;
                 pData->changed = false;
             }
             DestroyWindow(hWnd);
@@ -552,6 +688,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             // 点击标题栏关闭 → 取消操作
             wcscpy_s(pData->apiKey, pData->apiKeyOrig);
             pData->updateInterval = pData->updateIntervalOrig;
+            pData->requestTimeout = pData->requestTimeoutOrig;
             pData->changed = false;
         }
         DestroyWindow(hWnd);
@@ -598,6 +735,8 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
     wcscpy_s(dlgData.apiKeyOrig, m_apiKey);
     dlgData.updateInterval = m_updateInterval;
     dlgData.updateIntervalOrig = m_updateInterval;
+    dlgData.requestTimeout = m_requestTimeout;
+    dlgData.requestTimeoutOrig = m_requestTimeout;
     dlgData.changed = false;
 
     // 计算居中位置
@@ -647,6 +786,7 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
     {
         wcscpy_s(m_apiKey, dlgData.apiKey);
         m_updateInterval = dlgData.updateInterval;
+        m_requestTimeout = dlgData.requestTimeout;
         SaveConfig();
         return OR_OPTION_CHANGED;
     }

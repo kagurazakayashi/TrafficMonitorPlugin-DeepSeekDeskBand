@@ -149,13 +149,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Config.h" />
     <ClInclude Include="DeepSeekDeskBand.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="HttpClient.h" />
     <ClInclude Include="PluginInterface.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DeepSeekDeskBand.cpp" />
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="HttpClient.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

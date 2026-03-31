@@ -5,6 +5,7 @@
  *          以及插件导出函数 TMPluginGetInstance 的声明。
  ****************************************************************************/
 #pragma once
+#include "Config.h"
 #include "PluginInterface.h"
 #include <string>
 
@@ -46,7 +47,7 @@ private:
     static constexpr const wchar_t* SAMPLE_TEXT = L"9999 tokens";
 
     /** @brief 当前显示的数值文本缓冲区 */
-    wchar_t m_valueText[64];
+    wchar_t m_valueText[DSDB_BUF_VALUE];
 };
 
 /************************************************************************//**
@@ -90,10 +91,13 @@ private:
     ITrafficMonitor* m_pApp = nullptr;
 
     /** @brief DeepSeek API 密钥缓冲区 */
-    wchar_t m_apiKey[128] = {};
+    wchar_t m_apiKey[DSDB_BUF_APIKEY] = {};
 
     /** @brief 更新间隔，单位秒 */
-    int m_updateInterval = 60;
+    int m_updateInterval = DSDB_DEFAULT_INTERVAL;
+
+    /** @brief 请求超时时间，单位秒 */
+    int m_requestTimeout = DSDB_DEFAULT_TIMEOUT;
 
     /** @brief 获取配置文件完整路径 */
     std::wstring GetConfigFilePath();
