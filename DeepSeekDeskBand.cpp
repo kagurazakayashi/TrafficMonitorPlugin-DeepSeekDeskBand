@@ -5,10 +5,13 @@
  *          的所有接口函数，以及插件导出函数 TMPluginGetInstance()。
  ****************************************************************************/
 #include "DeepSeekDeskBand.h"
+#include "ConfigEncrypt.h"
 #include "HttpClient.h"
 #include "framework.h"
 #include <string.h>
 #include <stdio.h>
+#include <fstream>
+#include <vector>
 #include <string>
 #include <CommCtrl.h>
 #pragma comment(lib, "comctl32.lib")
@@ -177,9 +180,8 @@ std::wstring CDeepSeekDeskBand::GetConfigFilePath()
 }
 
 /**
- * @brief 从配置文件加载设置
- * @note  配置节名："Settings"
- *        键："DeepSeekAPIKey"、"UpdateInterval"
+ * @brief 从加密的二进制配置文件加载设置
+ * @note  解密失败时自动恢复默认设置。
  */
 void CDeepSeekDeskBand::LoadConfig()
 {
@@ -187,29 +189,34 @@ void CDeepSeekDeskBand::LoadConfig()
     if (configPath.empty())
         return;
 
-    // 加载 API 密钥
-    GetPrivateProfileStringW(
-        DSDB_CONFIG_SECTION,        // 配置节
-        DSDB_CONFIG_KEY_APIKEY,     // 键名
-        L"",                        // 默认值（空字符串）
-        m_apiKey,                   // 输出缓冲区
-        DSDB_BUF_APIKEY,            // 缓冲区大小
-        configPath.c_str());        // INI 文件路径
+    // 读取加密文件为原始字节
+    std::ifstream file(configPath, std::ios::binary | std::ios::ate);
+    if (!file.is_open())
+        return;     // 文件不存在，使用默认值
 
-    // 加载更新间隔
-    m_updateInterval = GetPrivateProfileIntW(
-        DSDB_CONFIG_SECTION,
-        DSDB_CONFIG_KEY_INTERVAL,
-        DSDB_DEFAULT_INTERVAL,      // 默认值
-        configPath.c_str());
+    std::streamsize fileSize = file.tellg();
+    if (fileSize <= 0)
+        return;
 
-    // 加载请求超时时间
-    m_requestTimeout = GetPrivateProfileIntW(
-        DSDB_CONFIG_SECTION,
-        DSDB_CONFIG_KEY_TIMEOUT,
-        DSDB_DEFAULT_TIMEOUT,       // 默认值
-        configPath.c_str());
-    // 钳制范围
+    file.seekg(0, std::ios::beg);
+    std::vector<uint8_t> encrypted(static_cast<size_t>(fileSize));
+    if (!file.read(reinterpret_cast<char*>(encrypted.data()), fileSize))
+        return;
+
+    // 解密并反序列化
+    ConfigBlob blob;
+    if (!ConfigDecrypt(encrypted, blob))
+        return;     // 解密失败，使用默认值
+
+    // 将解密结果应用到成员变量
+    wcsncpy_s(m_apiKey, blob.apiKey.c_str(), DSDB_BUF_APIKEY - 1);
+    m_apiKey[DSDB_BUF_APIKEY - 1] = L'\0';
+
+    m_updateInterval = blob.updateInterval;
+    if (m_updateInterval < DSDB_INTERVAL_MIN)
+        m_updateInterval = DSDB_INTERVAL_MIN;
+
+    m_requestTimeout = blob.requestTimeout;
     if (m_requestTimeout < DSDB_TIMEOUT_MIN)
         m_requestTimeout = DSDB_TIMEOUT_MIN;
     if (m_requestTimeout > DSDB_TIMEOUT_MAX)
@@ -217,8 +224,7 @@ void CDeepSeekDeskBand::LoadConfig()
 }
 
 /**
- * @brief 保存设置到配置文件
- * @note  自动创建目标目录（如需要）
+ * @brief 保存设置到加密的二进制配置文件
  */
 void CDeepSeekDeskBand::SaveConfig()
 {
@@ -226,26 +232,24 @@ void CDeepSeekDeskBand::SaveConfig()
     if (configPath.empty())
         return;
 
-    // 写入 API 密钥
-    WritePrivateProfileStringW(
-        DSDB_CONFIG_SECTION,
-        DSDB_CONFIG_KEY_APIKEY,
-        m_apiKey,
-        configPath.c_str());
+    // 组装明文配置
+    ConfigBlob blob;
+    blob.updateInterval = m_updateInterval;
+    blob.requestTimeout = m_requestTimeout;
+    blob.apiKey = m_apiKey;
 
-    // 写入更新间隔
-    WritePrivateProfileStringW(
-        DSDB_CONFIG_SECTION,
-        DSDB_CONFIG_KEY_INTERVAL,
-        std::to_wstring(m_updateInterval).c_str(),
-        configPath.c_str());
+    // 加密
+    std::vector<uint8_t> encrypted;
+    if (!ConfigEncrypt(blob, encrypted))
+        return;
 
-    // 写入请求超时时间
-    WritePrivateProfileStringW(
-        DSDB_CONFIG_SECTION,
-        DSDB_CONFIG_KEY_TIMEOUT,
-        std::to_wstring(m_requestTimeout).c_str(),
-        configPath.c_str());
+    // 写入二进制文件
+    std::ofstream file(configPath, std::ios::binary | std::ios::trunc);
+    if (!file.is_open())
+        return;
+
+    file.write(reinterpret_cast<const char*>(encrypted.data()),
+        static_cast<std::streamsize>(encrypted.size()));
 }
 
 /**

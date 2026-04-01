@@ -40,9 +40,9 @@
 // ============================================================
 
 /** @brief 配置文件名（位于插件配置目录下） */
-#define DSDB_CONFIG_FILENAME        L"DeepSeekDeskBand.ini"
+#define DSDB_CONFIG_FILENAME        L"DeepSeekDeskBand.dat"
 
-/** @brief 配置文件中的节名 */
+/** @brief 配置文件中的节名（保留用于未来兼容） */
 #define DSDB_CONFIG_SECTION         L"Settings"
 
 /** @brief 配置键：API 密钥 */
@@ -113,3 +113,16 @@
 
 /** @brief 插件作者 */
 #define DSDB_AUTHOR                 L"yashi"
+
+// ============================================================
+// AES-256 加密密钥（编译时常量，126 字符，不超 CHAR_MAX）
+// ============================================================
+
+/** @brief 配置文件 AES-256 加密密钥（明文，编译后嵌入二进制） */
+#define DSDB_ENCRYPTION_KEY \
+    L"Bx9$kM3#pL7@vR2&qW5!nY8~zC1^bF4*dG6)hJ9(tK2=sN5+uP8:oQ3?wT7!lV1@" \
+    L"cX4$eA6#jM8^bR5&yU9~hI2/aO7*mD3#qG1:xK6!pN0$sL4@wV8&tR2~bY7^eA3" \
+    L"*cF1%jI5"
+
+/** @brief 配置文件二进制魔数标识 */
+#define DSDB_CONFIG_MAGIC           0x44534442  // "DSDB"
