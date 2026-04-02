@@ -5,7 +5,10 @@
  *          以及插件导出函数 TMPluginGetInstance 的声明。
  ****************************************************************************/
 #pragma once
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include "Config.h"
+#include "HttpClient.h"
 #include "PluginInterface.h"
 #include <string>
 
@@ -43,8 +46,8 @@ private:
     /** @brief 显示标签文本，如 "DeepSeek" */
     static constexpr const wchar_t* LABEL_TEXT = L"DeepSeek";
 
-    /** @brief 示例文本，用于宽度计算 */
-    static constexpr const wchar_t* SAMPLE_TEXT = L"9999 tokens";
+    /** @brief 示例文本，用于宽度计算（足够宽以显示余额） */
+    static constexpr const wchar_t* SAMPLE_TEXT = L"9999.99 CNY";
 
     /** @brief 当前显示的数值文本缓冲区 */
     wchar_t m_valueText[DSDB_BUF_VALUE];
@@ -98,6 +101,15 @@ private:
 
     /** @brief 请求超时时间，单位秒 */
     int m_requestTimeout = DSDB_DEFAULT_TIMEOUT;
+
+    /** @brief 上次成功获取余额的时间戳（GetTickCount64），0 表示从未获取 */
+    ULONGLONG m_lastFetchTime = 0;
+
+    /** @brief 最近一次余额查询结果 */
+    ApiTestResult m_lastBalanceResult;
+
+    /** @brief 是否有有效的余额数据可供显示 */
+    bool m_hasBalance = false;
 
     /** @brief 获取配置文件完整路径 */
     std::wstring GetConfigFilePath();

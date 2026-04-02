@@ -123,18 +123,52 @@ IPluginItem* CDeepSeekDeskBand::GetItem(int index)
 
 /**
  * @brief 定时数据获取
- * @details 由主程序每隔一定时间调用，在此获取所有显示项目需要的监控数据。
- *          当前版本以自增计数器作为演示数值。
+ * @details 由主程序每隔一定时间调用。
+ *          按设定的更新间隔调用 DeepSeek API 查询余额，结果缓存显示。
  */
 void CDeepSeekDeskBand::DataRequired()
 {
-    // 静态计数器，每次调用自增，用于演示数值变化
-    static int counter = 0;
-    counter++;
+    // API 密钥为空 → 显示 "X"
+    if (m_apiKey[0] == L'\0')
+    {
+        m_hasBalance = false;
+        m_item.SetValueText(L"X");
+        return;
+    }
 
-    wchar_t valueText[DSDB_BUF_VALUE];
-    swprintf_s(valueText, L"%d", counter);
-    m_item.SetValueText(valueText);
+    ULONGLONG now = GetTickCount64();
+    ULONGLONG intervalMs = static_cast<ULONGLONG>(m_updateInterval) * 1000;
+
+    // 到达更新周期时发起 API 请求
+    if (m_lastFetchTime == 0 || (now - m_lastFetchTime) >= intervalMs)
+    {
+        ApiTestResult result = TestDeepSeekApi(m_apiKey, m_requestTimeout);
+
+        if (result.success)
+        {
+            m_lastBalanceResult = result;
+            m_hasBalance = true;
+            m_lastFetchTime = now;
+        }
+        else
+        {
+            m_hasBalance = false;
+        }
+    }
+
+    // 更新显示文本
+    if (m_hasBalance)
+    {
+        wchar_t valueText[DSDB_BUF_VALUE];
+        swprintf_s(valueText, L"%s %s",
+            m_lastBalanceResult.total_balance.c_str(),
+            m_lastBalanceResult.currency.c_str());
+        m_item.SetValueText(valueText);
+    }
+    else
+    {
+        m_item.SetValueText(L"X");
+    }
 }
 
 /**
@@ -170,13 +204,29 @@ const wchar_t* CDeepSeekDeskBand::GetInfo(PluginInfoIndex index)
 
 /**
  * @brief 获取配置文件完整路径
- * @return 配置文件路径字符串
+ * @return 配置文件路径字符串，始终使用 DLL 所在目录
  */
 std::wstring CDeepSeekDeskBand::GetConfigFilePath()
 {
-    if (m_pApp)
-        return std::wstring(m_pApp->GetPluginConfigDir()) + L"\\" DSDB_CONFIG_FILENAME;
-    return L"";     // 无法获取配置目录时返回空
+    // 获取当前 DLL 的完整路径，以此确定配置目录
+    wchar_t dllPath[MAX_PATH];
+    HMODULE hMod = nullptr;
+    GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(&Instance),
+        &hMod);
+    DWORD len = GetModuleFileNameW(hMod, dllPath, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH)
+        return L"";
+
+    // 去掉文件名，得到 DLL 所在目录
+    std::wstring dir(dllPath, len);
+    size_t lastSep = dir.find_last_of(L"\\/");
+    if (lastSep == std::wstring::npos)
+        return L"";
+    dir = dir.substr(0, lastSep);
+
+    return dir + L"\\" DSDB_CONFIG_FILENAME;
 }
 
 /**
@@ -188,6 +238,29 @@ void CDeepSeekDeskBand::LoadConfig()
     std::wstring configPath = GetConfigFilePath();
     if (configPath.empty())
         return;
+
+    // 诊断：将使用的配置路径写入 dsdb_path.txt（与配置文件同目录）
+    {
+        std::wstring diagPath = configPath;
+        size_t lastSep = diagPath.find_last_of(L"\\/");
+        if (lastSep != std::wstring::npos)
+            diagPath = diagPath.substr(0, lastSep + 1);
+        diagPath += L"dsdb_path.txt";
+        std::ofstream diag(diagPath, std::ios::trunc);
+        if (diag.is_open())
+        {
+            diag << "LoadConfig path: ";
+            // 宽字符转 UTF-8 写入
+            int len = WideCharToMultiByte(CP_UTF8, 0, configPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
+            if (len > 0)
+            {
+                std::vector<char> buf(len);
+                WideCharToMultiByte(CP_UTF8, 0, configPath.c_str(), -1, buf.data(), len, nullptr, nullptr);
+                diag.write(buf.data(), len - 1);
+            }
+            diag << "\n";
+        }
+    }
 
     // 读取加密文件为原始字节
     std::ifstream file(configPath, std::ios::binary | std::ios::ate);
@@ -243,6 +316,15 @@ void CDeepSeekDeskBand::SaveConfig()
     if (!ConfigEncrypt(blob, encrypted))
         return;
 
+    // 确保目标目录存在
+    std::wstring dirPath = configPath;
+    size_t lastSep = dirPath.find_last_of(L"\\/");
+    if (lastSep != std::wstring::npos)
+    {
+        dirPath = dirPath.substr(0, lastSep);
+        CreateDirectoryW(dirPath.c_str(), nullptr);
+    }
+
     // 写入二进制文件
     std::ofstream file(configPath, std::ios::binary | std::ios::trunc);
     if (!file.is_open())
@@ -250,6 +332,7 @@ void CDeepSeekDeskBand::SaveConfig()
 
     file.write(reinterpret_cast<const char*>(encrypted.data()),
         static_cast<std::streamsize>(encrypted.size()));
+    file.close();   // 显式关闭确保写入磁盘
 }
 
 /**
@@ -791,6 +874,8 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
         wcscpy_s(m_apiKey, dlgData.apiKey);
         m_updateInterval = dlgData.updateInterval;
         m_requestTimeout = dlgData.requestTimeout;
+        m_hasBalance = false;       // 设置变更后立即重新获取余额
+        m_lastFetchTime = 0;
         SaveConfig();
         return OR_OPTION_CHANGED;
     }

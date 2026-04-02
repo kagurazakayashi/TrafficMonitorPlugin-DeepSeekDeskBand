@@ -299,19 +299,22 @@ static bool AesDecrypt(const uint8_t key[AES256_KEY_SIZE],
             const_cast<PUCHAR>(key), AES256_KEY_SIZE, 0)))
         return false;
 
-    // 3. 第一次调用获取明文缓冲区大小
+    // 3. 拷贝 IV（BCryptDecrypt 在 CBC 模式下会修改 IV，两次调用不可共用）
+    uint8_t ivCopy[AES_BLOCK_SIZE];
+    memcpy(ivCopy, iv, AES_BLOCK_SIZE);
+
     ULONG plaintextLen = 0;
     NTSTATUS status = BCryptDecrypt(hKey.get(),
         const_cast<PUCHAR>(ciphertext.data()),
         static_cast<ULONG>(ciphertext.size()),
-        nullptr, iv, AES_BLOCK_SIZE,
+        nullptr, ivCopy, AES_BLOCK_SIZE,
         nullptr, 0, &plaintextLen,
         BCRYPT_BLOCK_PADDING);
 
     if (!NT_SUCCESS(status))
         return false;
 
-    // 4. 第二次调用执行解密
+    // 4. 第二次调用执行解密（使用原始 IV）
     plaintext.resize(plaintextLen);
     ULONG outLen = 0;
     status = BCryptDecrypt(hKey.get(),
