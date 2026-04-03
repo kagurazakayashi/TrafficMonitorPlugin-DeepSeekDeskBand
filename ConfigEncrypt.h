@@ -1,8 +1,8 @@
 /************************************************************************//**
  * @file    ConfigEncrypt.h
- * @brief   配置文件 AES-256-CBC 加密模块声明
- * @details 使用 Windows BCrypt (CNG) 实现。密钥由 Config.h 中的
- *          DSDB_ENCRYPTION_KEY 宏经 SHA-256 派生得到。
+ * @brief   配置文件加密模块声明
+ * @details 使用 Windows DPAPI (CryptProtectData / CryptUnprotectData)，
+ *          数据仅限当前 Windows 用户解密，无需管理密钥。
  ****************************************************************************/
 #pragma once
 #include "Config.h"
@@ -30,17 +30,17 @@ struct ConfigBlob
 // ============================================================
 
 /************************************************************************//**
- * @brief  将配置数据加密为二进制缓冲区
+ * @brief  使用 DPAPI 加密配置数据
  * @param  config      要加密的明文配置
- * @param  outEncrypted 输出：加密后的数据（格式：[16B IV][密文]）
+ * @param  outEncrypted 输出：加密后的二进制数据
  * @return 成功返回 true
  ****************************************************************************/
 bool ConfigEncrypt(const ConfigBlob& config, std::vector<uint8_t>& outEncrypted);
 
 /************************************************************************//**
- * @brief  从二进制缓冲区解密配置数据
- * @param  encrypted   加密数据（格式：[16B IV][密文]）
+ * @brief  使用 DPAPI 解密配置数据
+ * @param  encrypted   加密数据
  * @param  outConfig   输出：解密后的配置明文
- * @return 成功返回 true；任何失败（密钥错误、数据损坏等）返回 false
+ * @return 成功返回 true；失败（不同用户、数据损坏等）返回 false
  ****************************************************************************/
 bool ConfigDecrypt(const std::vector<uint8_t>& encrypted, ConfigBlob& outConfig);

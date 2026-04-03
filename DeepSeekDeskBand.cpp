@@ -7,6 +7,7 @@
 #include "DeepSeekDeskBand.h"
 #include "ConfigEncrypt.h"
 #include "HttpClient.h"
+#include "Logger.h"
 #include "framework.h"
 #include <string.h>
 #include <stdio.h>
@@ -128,11 +129,15 @@ IPluginItem* CDeepSeekDeskBand::GetItem(int index)
  */
 void CDeepSeekDeskBand::DataRequired()
 {
-    // API 密钥为空 → 显示 "X"
+    // API 密钥为空 → 显示 "--"
     if (m_apiKey[0] == L'\0')
     {
-        m_hasBalance = false;
-        m_item.SetValueText(L"X");
+        if (m_hasBalance)
+        {
+            Logger_Log(L"DataRequired: API 密钥为空，清除余额显示");
+            m_hasBalance = false;
+        }
+        m_item.SetValueText(L"--");
         return;
     }
 
@@ -142,16 +147,22 @@ void CDeepSeekDeskBand::DataRequired()
     // 到达更新周期时发起 API 请求
     if (m_lastFetchTime == 0 || (now - m_lastFetchTime) >= intervalMs)
     {
+        Logger_Log(L"DataRequired: 开始获取余额 (interval=%ds timeout=%ds)",
+            m_updateInterval, m_requestTimeout);
         ApiTestResult result = TestDeepSeekApi(m_apiKey, m_requestTimeout);
 
         if (result.success)
         {
+            Logger_Log(L"DataRequired: 获取成功 total=%s %s",
+                result.total_balance.c_str(), result.currency.c_str());
             m_lastBalanceResult = result;
             m_hasBalance = true;
             m_lastFetchTime = now;
         }
         else
         {
+            Logger_Log(L"DataRequired: 获取失败 err=\"%s\" http=%d",
+                result.error_message.c_str(), result.http_status_code);
             m_hasBalance = false;
         }
     }
@@ -167,7 +178,7 @@ void CDeepSeekDeskBand::DataRequired()
     }
     else
     {
-        m_item.SetValueText(L"X");
+        m_item.SetValueText(L"--");
     }
 }
 
@@ -208,25 +219,14 @@ const wchar_t* CDeepSeekDeskBand::GetInfo(PluginInfoIndex index)
  */
 std::wstring CDeepSeekDeskBand::GetConfigFilePath()
 {
-    // 获取当前 DLL 的完整路径，以此确定配置目录
-    wchar_t dllPath[MAX_PATH];
-    HMODULE hMod = nullptr;
-    GetModuleHandleExW(
-        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        reinterpret_cast<LPCWSTR>(&Instance),
-        &hMod);
-    DWORD len = GetModuleFileNameW(hMod, dllPath, MAX_PATH);
-    if (len == 0 || len >= MAX_PATH)
-        return L"";
-
-    // 去掉文件名，得到 DLL 所在目录
-    std::wstring dir(dllPath, len);
-    size_t lastSep = dir.find_last_of(L"\\/");
-    if (lastSep == std::wstring::npos)
-        return L"";
-    dir = dir.substr(0, lastSep);
-
-    return dir + L"\\" DSDB_CONFIG_FILENAME;
+    if (m_pApp)
+    {
+        std::wstring path = std::wstring(m_pApp->GetPluginConfigDir()) + L"\\" DSDB_CONFIG_FILENAME;
+        Logger_Log(L"GetConfigFilePath: \"%s\"", path.c_str());
+        return path;
+    }
+    Logger_Log(L"GetConfigFilePath: m_pApp 为空，无法获取路径");
+    return L"";
 }
 
 /**
@@ -237,49 +237,54 @@ void CDeepSeekDeskBand::LoadConfig()
 {
     std::wstring configPath = GetConfigFilePath();
     if (configPath.empty())
-        return;
-
-    // 诊断：将使用的配置路径写入 dsdb_path.txt（与配置文件同目录）
     {
-        std::wstring diagPath = configPath;
-        size_t lastSep = diagPath.find_last_of(L"\\/");
-        if (lastSep != std::wstring::npos)
-            diagPath = diagPath.substr(0, lastSep + 1);
-        diagPath += L"dsdb_path.txt";
-        std::ofstream diag(diagPath, std::ios::trunc);
-        if (diag.is_open())
-        {
-            diag << "LoadConfig path: ";
-            // 宽字符转 UTF-8 写入
-            int len = WideCharToMultiByte(CP_UTF8, 0, configPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
-            if (len > 0)
-            {
-                std::vector<char> buf(len);
-                WideCharToMultiByte(CP_UTF8, 0, configPath.c_str(), -1, buf.data(), len, nullptr, nullptr);
-                diag.write(buf.data(), len - 1);
-            }
-            diag << "\n";
-        }
+        Logger_Log(L"LoadConfig: 路径为空，使用默认值");
+        return;
     }
+
+    // 检查文件是否存在
+    DWORD attr = GetFileAttributesW(configPath.c_str());
+    if (attr == INVALID_FILE_ATTRIBUTES)
+    {
+        Logger_Log(L"LoadConfig: 文件不存在 (attr=INVALID), 使用默认值");
+        return;
+    }
+    Logger_Log(L"LoadConfig: 文件存在, attr=0x%08X", attr);
 
     // 读取加密文件为原始字节
     std::ifstream file(configPath, std::ios::binary | std::ios::ate);
     if (!file.is_open())
-        return;     // 文件不存在，使用默认值
+    {
+        Logger_Log(L"LoadConfig: 无法打开文件，使用默认值");
+        return;
+    }
 
     std::streamsize fileSize = file.tellg();
     if (fileSize <= 0)
+    {
+        Logger_Log(L"LoadConfig: 文件大小为 0，使用默认值");
         return;
+    }
+    Logger_Log(L"LoadConfig: 文件大小=%lld 字节", static_cast<long long>(fileSize));
 
     file.seekg(0, std::ios::beg);
     std::vector<uint8_t> encrypted(static_cast<size_t>(fileSize));
     if (!file.read(reinterpret_cast<char*>(encrypted.data()), fileSize))
+    {
+        Logger_Log(L"LoadConfig: 读取文件失败，使用默认值");
         return;
+    }
 
     // 解密并反序列化
     ConfigBlob blob;
     if (!ConfigDecrypt(encrypted, blob))
-        return;     // 解密失败，使用默认值
+    {
+        Logger_Log(L"LoadConfig: ConfigDecrypt 失败，使用默认值");
+        return;
+    }
+
+    Logger_Log(L"LoadConfig: 解密成功 updateInterval=%d requestTimeout=%d apiKey=\"%s\"",
+        blob.updateInterval, blob.requestTimeout, blob.apiKey.c_str());
 
     // 将解密结果应用到成员变量
     wcsncpy_s(m_apiKey, blob.apiKey.c_str(), DSDB_BUF_APIKEY - 1);
@@ -294,6 +299,9 @@ void CDeepSeekDeskBand::LoadConfig()
         m_requestTimeout = DSDB_TIMEOUT_MIN;
     if (m_requestTimeout > DSDB_TIMEOUT_MAX)
         m_requestTimeout = DSDB_TIMEOUT_MAX;
+
+    Logger_Log(L"LoadConfig: 应用后 updateInterval=%d requestTimeout=%d apiKey[0]='%c'",
+        m_updateInterval, m_requestTimeout, (m_apiKey[0] ? m_apiKey[0] : L'-'));
 }
 
 /**
@@ -303,7 +311,10 @@ void CDeepSeekDeskBand::SaveConfig()
 {
     std::wstring configPath = GetConfigFilePath();
     if (configPath.empty())
+    {
+        Logger_Log(L"SaveConfig: 路径为空，放弃保存");
         return;
+    }
 
     // 组装明文配置
     ConfigBlob blob;
@@ -311,28 +322,34 @@ void CDeepSeekDeskBand::SaveConfig()
     blob.requestTimeout = m_requestTimeout;
     blob.apiKey = m_apiKey;
 
+    Logger_Log(L"SaveConfig: interval=%d timeout=%d apiKey=\"%s\"",
+        blob.updateInterval, blob.requestTimeout, blob.apiKey.c_str());
+
     // 加密
     std::vector<uint8_t> encrypted;
     if (!ConfigEncrypt(blob, encrypted))
-        return;
-
-    // 确保目标目录存在
-    std::wstring dirPath = configPath;
-    size_t lastSep = dirPath.find_last_of(L"\\/");
-    if (lastSep != std::wstring::npos)
     {
-        dirPath = dirPath.substr(0, lastSep);
-        CreateDirectoryW(dirPath.c_str(), nullptr);
+        Logger_Log(L"SaveConfig: ConfigEncrypt 失败！");
+        return;
     }
+    Logger_Log(L"SaveConfig: 加密后大小=%zu 字节", encrypted.size());
 
     // 写入二进制文件
     std::ofstream file(configPath, std::ios::binary | std::ios::trunc);
     if (!file.is_open())
+    {
+        Logger_Log(L"SaveConfig: 无法创建文件 \"%s\"", configPath.c_str());
         return;
+    }
 
     file.write(reinterpret_cast<const char*>(encrypted.data()),
         static_cast<std::streamsize>(encrypted.size()));
-    file.close();   // 显式关闭确保写入磁盘
+    file.close();
+
+    if (file.good())
+        Logger_Log(L"SaveConfig: 写入成功 \"%s\"", configPath.c_str());
+    else
+        Logger_Log(L"SaveConfig: 写入失败！\"%s\"", configPath.c_str());
 }
 
 /**
@@ -343,7 +360,12 @@ void CDeepSeekDeskBand::SaveConfig()
 void CDeepSeekDeskBand::OnInitialize(ITrafficMonitor* pApp)
 {
     m_pApp = pApp;
+    Logger_Log(L"======== 插件初始化 ========");
+    Logger_Log(L"OnInitialize: pApp=%p, GetPluginConfigDir()=\"%s\"",
+        pApp, pApp ? pApp->GetPluginConfigDir() : L"(null)");
     LoadConfig();
+    Logger_Log(L"加载配置完成: apiKey[0]='%c' updateInterval=%d requestTimeout=%d",
+        (m_apiKey[0] ? m_apiKey[0] : L'-'), m_updateInterval, m_requestTimeout);
 }
 
 // ============================================================
@@ -871,14 +893,17 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
     // ---- 对话框关闭后，根据变更标志决定是否保存 ----
     if (dlgData.changed)
     {
+        Logger_Log(L"ShowOptionsDialog: 设置已变更，准备保存");
         wcscpy_s(m_apiKey, dlgData.apiKey);
         m_updateInterval = dlgData.updateInterval;
         m_requestTimeout = dlgData.requestTimeout;
         m_hasBalance = false;       // 设置变更后立即重新获取余额
         m_lastFetchTime = 0;
         SaveConfig();
+        Logger_Log(L"ShowOptionsDialog: 保存完毕，返回 OR_OPTION_CHANGED");
         return OR_OPTION_CHANGED;
     }
+    Logger_Log(L"ShowOptionsDialog: 设置未变更，返回 OR_OPTION_UNCHANGED");
     return OR_OPTION_UNCHANGED;
 }
 
