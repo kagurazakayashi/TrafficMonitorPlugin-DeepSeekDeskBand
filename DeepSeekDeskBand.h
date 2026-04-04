@@ -11,6 +11,26 @@
 #include "HttpClient.h"
 #include "PluginInterface.h"
 #include <string>
+#include <vector>
+#include <cstdint>
+
+/************************************************************************//**
+ * @struct HistoryRecord
+ * @brief  余额刷新历史记录
+ * @details 每次刷新余额时记录时间戳、可用状态、各余额值和币种。
+ *          所有数值以 double 存储以保证精度。
+ ****************************************************************************/
+#pragma pack(push, 1)
+struct HistoryRecord
+{
+    int64_t timestamp;              ///< Unix 时间戳（毫秒）
+    uint8_t is_available;           ///< 账户是否可用（0 或 1）
+    double  total_balance;          ///< 总余额数值
+    double  granted_balance;        ///< 赠送余额数值
+    double  topped_up_balance;      ///< 充值余额数值
+    wchar_t currency[8];            ///< 币种字符串（最多 7 字符 + null，如 "CNY"）
+};
+#pragma pack(pop)
 
 /************************************************************************//**
  * @class CDeepSeekDeskBandItem
@@ -77,8 +97,21 @@ public:
     /** @brief 打开插件的设置对话框 */
     virtual OptionReturn ShowOptionsDialog(void* hParent) override;
 
+    /** @brief 获取插件命令数量（右键菜单项） */
+    virtual int GetCommandCount() override;
+
+    /** @brief 获取插件命令名称 */
+    virtual const wchar_t* GetCommandName(int command_index) override;
+
+    /** @brief 执行插件命令 */
+    virtual void OnPluginCommand(int command_index, void* hWnd, void* para) override;
+
     /** @brief 插件初始化，获取主程序接口指针，加载配置 */
     virtual void OnInitialize(ITrafficMonitor* pApp) override;
+
+    /** @brief 保存历史记录到文件
+     *  @param fullRewrite true=整体加密重写；false=仅追加最后一条 */
+    void SaveHistory(bool fullRewrite);
 
 private:
     /** @brief 私有构造函数，防止外部直接创建实例 */
@@ -111,14 +144,29 @@ private:
     /** @brief 是否有有效的余额数据可供显示 */
     bool m_hasBalance = false;
 
+    /** @brief 历史记录列表（内存缓存） */
+    std::vector<HistoryRecord> m_historyRecords;
+
+    /** @brief 历史记录最大保留数量（0 表示不记录） */
+    int m_maxHistoryCount = DSDB_DEFAULT_HISTORY_COUNT;
+
     /** @brief 获取配置文件完整路径 */
     std::wstring GetConfigFilePath();
+
+    /** @brief 获取历史记录文件完整路径 */
+    std::wstring GetHistoryFilePath();
 
     /** @brief 从配置文件加载设置 */
     void LoadConfig();
 
     /** @brief 保存设置到配置文件 */
     void SaveConfig();
+
+    /** @brief 从历史记录文件加载历史记录 */
+    void LoadHistory();
+
+    /** @brief 追加一条历史记录（自动触发文件写入） */
+    void AppendHistoryRecord(const ApiTestResult& result);
 };
 
 #ifdef __cplusplus

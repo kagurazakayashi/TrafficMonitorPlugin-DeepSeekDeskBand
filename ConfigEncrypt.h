@@ -20,9 +20,10 @@
  ****************************************************************************/
 struct ConfigBlob
 {
-    int32_t     updateInterval;     ///< 更新间隔（秒）
-    int32_t     requestTimeout;     ///< 请求超时（秒）
-    std::wstring apiKey;            ///< DeepSeek API 密钥
+    int32_t     updateInterval;          ///< 更新间隔（秒）
+    int32_t     requestTimeout;          ///< 请求超时（秒）
+    int32_t     maxHistoryCount;         ///< 历史记录最大保留数量
+    std::wstring apiKey;                 ///< DeepSeek API 密钥
 };
 
 // ============================================================

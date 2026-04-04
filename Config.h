@@ -120,3 +120,22 @@
 
 /** @brief 配置文件二进制魔数标识 */
 #define DSDB_CONFIG_MAGIC           0x44534442  // "DSDB"
+
+// ============================================================
+// 历史记录相关
+// ============================================================
+
+/** @brief 历史记录文件名（位于插件配置目录下） */
+#define DSDB_HISTORY_FILENAME       L"DeepSeekDeskBand_History.dat"
+
+/** @brief 历史记录文件魔数标识 */
+#define DSDB_HISTORY_MAGIC          0x44534842  // "DSHB"
+
+/** @brief 历史记录默认数量 */
+#define DSDB_DEFAULT_HISTORY_COUNT  1000
+
+/** @brief 历史记录最小数量（0 表示不记录） */
+#define DSDB_HISTORY_COUNT_MIN      0
+
+/** @brief 历史记录最大数量 */
+#define DSDB_HISTORY_COUNT_MAX      10000
