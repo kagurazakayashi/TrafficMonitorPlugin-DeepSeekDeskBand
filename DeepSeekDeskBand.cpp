@@ -830,6 +830,12 @@ void CDeepSeekDeskBand::OnInitialize(ITrafficMonitor* pApp)
 // 设置对话框
 // ============================================================
 
+/** @brief 当前对话框 DPI 值（96 为 100%） */
+static int g_dpi = 96;
+
+/** @brief 按 DPI 缩放像素值 */
+static inline int Scale(int value) { return MulDiv(value, g_dpi, 96); }
+
 /** @brief 设置对话框窗口类名 */
 static const wchar_t* SETTINGS_DIALOG_CLASS = L"DeepSeekDeskBandSettingsDlg";
 
@@ -850,6 +856,7 @@ enum
     IDC_SPIN_HISTORY_COUNT  = 1012,   // 历史记录数量 UpDown 控件
     IDC_LIST_HISTORY        = 1013,   // 历史记录 ListView 控件
     IDC_BTN_CLEAR_HISTORY   = 1014,   // 清除历史按钮
+    IDC_CHECK_AUTO_REFRESH  = 1015,   // 自动刷新复选框
 };
 
 /**
@@ -869,6 +876,7 @@ struct SettingsDlgData
     int     maxHistoryCountOrig;      // 原始历史记录最大数量
     const std::vector<HistoryRecord>* historyRecords; // 指向插件实例中的历史记录（只读）
     bool    historyCleared;            // 历史记录是否已被清除
+    bool    autoRefresh;               // 列表是否自动刷新（默认 true）
     bool    changed;                  // 是否有未保存的变更
     bool    apiTested;                // API 是否已通过测试
 };
@@ -927,11 +935,13 @@ static void RefreshHistoryList(HWND hList, const std::vector<HistoryRecord>* rec
     if (!records || records->empty())
         return;
 
-    for (size_t i = 0; i < records->size(); i++)
+    // 反向遍历：新记录靠前显示
+    for (size_t i = records->size(); i > 0; i--)
     {
-        const HistoryRecord& rec = (*records)[i];
+        const HistoryRecord& rec = (*records)[i - 1];
+        int rowIndex = static_cast<int>(records->size() - i);
 
-        // 列 0：时间戳格式化为可读时间
+        // 列 0：时间戳格式化为可读时间（按系统区域格式）
         wchar_t timeStr[32];
         if (rec.timestamp > 0)
         {
@@ -946,9 +956,14 @@ static void RefreshHistoryList(HWND hList, const std::vector<HistoryRecord>* rec
             SYSTEMTIME stLocal;
             SystemTimeToTzSpecificLocalTime(nullptr, &st, &stLocal);
 
-            GetDateFormatW(LOCALE_USER_DEFAULT, 0, &stLocal, L"MM-dd", timeStr, 6);
-            timeStr[5] = L' ';
-            GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &stLocal, L"HH:mm:ss", timeStr + 6, 9);
+            // 按系统区域格式获取日期
+            wchar_t dateStr[16];
+            GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &stLocal, nullptr, dateStr, 16);
+            // 按系统区域格式获取时间（不含秒，节省列宽）
+            wchar_t timePart[16];
+            GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &stLocal, nullptr, timePart, 16);
+            // 拼接：日期 + 空格 + 时间
+            swprintf_s(timeStr, L"%s %s", dateStr, timePart);
         }
         else
         {
@@ -958,20 +973,20 @@ static void RefreshHistoryList(HWND hList, const std::vector<HistoryRecord>* rec
         // 插入一行
         LVITEMW lvi = {};
         lvi.mask = 0;
-        lvi.iItem = static_cast<int>(i);
+        lvi.iItem = rowIndex;
         ListView_InsertItem(hList, &lvi);
-        ListView_SetItemText(hList, static_cast<int>(i), 0, timeStr);
-        ListView_SetItemText(hList, static_cast<int>(i), 1,
+        ListView_SetItemText(hList, rowIndex, 0, timeStr);
+        ListView_SetItemText(hList, rowIndex, 1,
             const_cast<wchar_t*>(rec.is_available ? L"是" : L"否"));
 
         wchar_t numStr[32];
         swprintf_s(numStr, L"%.2f", rec.total_balance);
-        ListView_SetItemText(hList, static_cast<int>(i), 2, numStr);
+        ListView_SetItemText(hList, rowIndex, 2, numStr);
         swprintf_s(numStr, L"%.2f", rec.granted_balance);
-        ListView_SetItemText(hList, static_cast<int>(i), 3, numStr);
+        ListView_SetItemText(hList, rowIndex, 3, numStr);
         swprintf_s(numStr, L"%.2f", rec.topped_up_balance);
-        ListView_SetItemText(hList, static_cast<int>(i), 4, numStr);
-        ListView_SetItemText(hList, static_cast<int>(i), 5, const_cast<wchar_t*>(rec.currency));
+        ListView_SetItemText(hList, rowIndex, 4, numStr);
+        ListView_SetItemText(hList, rowIndex, 5, const_cast<wchar_t*>(rec.currency));
     }
 }
 
@@ -996,7 +1011,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         // ---- 创建系统消息字体（Segoe UI 9pt，现代外观） ----
         NONCLIENTMETRICSW ncm = { sizeof(NONCLIENTMETRICSW) };
         SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
-        ncm.lfMessageFont.lfHeight = -12;      // 9pt 高度
+        ncm.lfMessageFont.lfHeight = -MulDiv(9, g_dpi, 72);  // 9pt DPI 适配
         ncm.lfMessageFont.lfWeight = FW_NORMAL;
         HFONT hFont = CreateFontIndirectW(&ncm.lfMessageFont);
         SetPropW(hWnd, L"hFont", hFont);       // 存储以便在 WM_DESTROY 释放
@@ -1006,80 +1021,80 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         // --- "DeepSeek API:" 标签 ---
         hChild = CreateWindowW(L"STATIC", L"DeepSeek API:",
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            20, 22, 110, 20,
+            Scale(20), Scale(22), Scale(110), Scale(20),
             hWnd, nullptr, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // --- API 密钥输入框（密码掩码，宽度足够容纳 35 字符） ---
+        // --- API 密钥输入框 ---
         hChild = CreateWindowW(L"EDIT", pData->apiKey,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP,
-            135, 19, 375, 22,
+            Scale(135), Scale(19), Scale(375), Scale(22),
             hWnd, (HMENU)IDC_EDIT_API_KEY, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // --- API 格式校验提示（默认隐藏） ---
+        // --- API 格式校验提示 ---
         hChild = CreateWindowW(L"STATIC", L"密钥格式错误：必须以 sk- 开头，后跟32位小写字母和数字",
             WS_CHILD | SS_LEFT,
-            135, 44, 375, 16,
+            Scale(135), Scale(44), Scale(375), Scale(16),
             hWnd, (HMENU)IDC_STATIC_API_HINT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "测试API(&T)" 按钮 ---
         hChild = CreateWindowW(L"BUTTON", L"测试API(&T)",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-            135, 74, 90, 24,
+            Scale(135), Scale(74), Scale(90), Scale(24),
             hWnd, (HMENU)IDC_BTN_TEST_API, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 测试结果状态文本 ---
-        hChild = CreateWindowW(L"STATIC", L"",
+        hChild = CreateWindowW(L"STATIC", L"< 请先测试再保存",
             WS_CHILD | WS_VISIBLE | SS_LEFT,
-            235, 77, 280, 20,
+            Scale(235), Scale(77), Scale(280), Scale(20),
             hWnd, (HMENU)IDC_STATIC_STATUS, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "更新间隔（秒）:" 标签 ---
         hChild = CreateWindowW(L"STATIC", L"更新间隔（秒）:",
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            20, 124, 110, 20,
+            Scale(20), Scale(124), Scale(110), Scale(20),
             hWnd, nullptr, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // --- 更新间隔输入框（Spin 控件的伙伴编辑框） ---
+        // --- 更新间隔输入框 ---
         wchar_t bufInterval[DSDB_BUF_NUMBER];
         swprintf_s(bufInterval, L"%d", pData->updateInterval);
         hChild = CreateWindowW(L"EDIT", bufInterval,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            135, 121, 100, 22,
+            Scale(135), Scale(121), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_INTERVAL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // --- UpDown Spin 控件（自动与伙伴编辑框对齐，范围 1~31,536,000） ---
+        // --- 更新间隔 Spin ---
         hChild = CreateWindowW(UPDOWN_CLASSW, nullptr,
             WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_SETBUDDYINT,
             0, 0, 0, 0,
             hWnd, (HMENU)IDC_SPIN_INTERVAL, hInst, nullptr);
-            SendMessageW(hChild, UDM_SETRANGE32, DSDB_INTERVAL_MIN, DSDB_INTERVAL_MAX);   // 范围
+        SendMessageW(hChild, UDM_SETRANGE32, DSDB_INTERVAL_MIN, DSDB_INTERVAL_MAX);
         SendMessageW(hChild, UDM_SETPOS32, 0, pData->updateInterval);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "请求超时（秒）:" 标签 ---
         hChild = CreateWindowW(L"STATIC", L"请求超时（秒）:",
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            20, 174, 110, 20,
+            Scale(290), Scale(124), Scale(110), Scale(20),
             hWnd, nullptr, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // --- 请求超时输入框（Spin 控件的伙伴编辑框） ---
+        // --- 请求超时输入框 ---
         wchar_t bufTimeout[DSDB_BUF_NUMBER];
         swprintf_s(bufTimeout, L"%d", pData->requestTimeout);
         hChild = CreateWindowW(L"EDIT", bufTimeout,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            135, 171, 100, 22,
+            Scale(405), Scale(121), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_TIMEOUT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // --- 超时 UpDown Spin 控件（范围 3~60 秒） ---
+        // --- 超时 Spin ---
         {
             HWND hSpin = CreateWindowW(UPDOWN_CLASSW, nullptr,
                 WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_SETBUDDYINT,
@@ -1093,20 +1108,20 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         // --- "历史记录数量:" 标签 ---
         hChild = CreateWindowW(L"STATIC", L"历史记录数量:",
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            20, 224, 110, 20,
+            Scale(20), Scale(174), Scale(110), Scale(20),
             hWnd, nullptr, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // --- 历史记录数量输入框（Spin 控件的伙伴编辑框） ---
+        // --- 历史记录数量输入框 ---
         wchar_t bufHistoryCount[DSDB_BUF_NUMBER];
         swprintf_s(bufHistoryCount, L"%d", pData->maxHistoryCount);
         hChild = CreateWindowW(L"EDIT", bufHistoryCount,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            135, 221, 100, 22,
+            Scale(135), Scale(171), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_HISTORY_COUNT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // --- 历史记录数量 UpDown Spin 控件（范围 0~10000） ---
+        // --- 历史记录数量 Spin ---
         {
             HWND hSpin = CreateWindowW(UPDOWN_CLASSW, nullptr,
                 WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_SETBUDDYINT,
@@ -1117,74 +1132,75 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             SendMessageW(hSpin, WM_SETFONT, (WPARAM)hFont, TRUE);
         }
 
+        // --- "自动刷新" 复选框 ---
+        hChild = CreateWindowW(L"BUTTON", L"自动刷新",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
+            Scale(260), Scale(173), Scale(90), Scale(22),
+            hWnd, (HMENU)IDC_CHECK_AUTO_REFRESH, hInst, nullptr);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+        SendMessageW(hChild, BM_SETCHECK, BST_CHECKED, 0);
+        pData->autoRefresh = true;
+
         // --- "历史记录:" 标签 ---
         hChild = CreateWindowW(L"STATIC", L"历史记录:",
             WS_CHILD | WS_VISIBLE | SS_LEFT,
-            20, 256, 80, 20,
+            Scale(20), Scale(206), Scale(80), Scale(20),
             hWnd, nullptr, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // --- 历史记录 ListView 控件（报告模式，多列显示） ---
+        // --- 历史记录 ListView ---
         {
             HWND hList = CreateWindowW(WC_LISTVIEWW, nullptr,
                 WS_CHILD | WS_VISIBLE | WS_BORDER | LVS_REPORT | LVS_SINGLESEL |
                 LVS_SHOWSELALWAYS | WS_TABSTOP,
-                20, 278, 500, 180,
+                Scale(20), Scale(228), Scale(550), Scale(170),
                 hWnd, (HMENU)IDC_LIST_HISTORY, hInst, nullptr);
             SendMessageW(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            // 启用整行选择和网格线
             ListView_SetExtendedListViewStyle(hList,
                 LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
 
-            // 添加列标题
             LVCOLUMNW lvc = {};
             lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
             lvc.fmt = LVCFMT_LEFT;
 
-            lvc.cx = 140; lvc.pszText = const_cast<wchar_t*>(L"时间");
+            lvc.cx = Scale(140); lvc.pszText = const_cast<wchar_t*>(L"时间");
             ListView_InsertColumn(hList, 0, &lvc);
-
-            lvc.cx = 50;  lvc.pszText = const_cast<wchar_t*>(L"可用");
+            lvc.cx = Scale(50);  lvc.pszText = const_cast<wchar_t*>(L"可用");
             ListView_InsertColumn(hList, 1, &lvc);
-
-            lvc.cx = 85;  lvc.pszText = const_cast<wchar_t*>(L"总余额");
+            lvc.cx = Scale(85);  lvc.pszText = const_cast<wchar_t*>(L"总余额");
             ListView_InsertColumn(hList, 2, &lvc);
-
-            lvc.cx = 85;  lvc.pszText = const_cast<wchar_t*>(L"赠送余额");
+            lvc.cx = Scale(85);  lvc.pszText = const_cast<wchar_t*>(L"赠送余额");
             ListView_InsertColumn(hList, 3, &lvc);
-
-            lvc.cx = 85;  lvc.pszText = const_cast<wchar_t*>(L"充值余额");
+            lvc.cx = Scale(85);  lvc.pszText = const_cast<wchar_t*>(L"充值余额");
             ListView_InsertColumn(hList, 4, &lvc);
-
-            lvc.cx = 55;  lvc.pszText = const_cast<wchar_t*>(L"币种");
+            lvc.cx = Scale(55);  lvc.pszText = const_cast<wchar_t*>(L"币种");
             ListView_InsertColumn(hList, 5, &lvc);
 
-            // 填充初始数据
             RefreshHistoryList(hList, pData->historyRecords);
         }
 
-        // 启动定时器，每秒刷新一次 ListView（自动反映新增记录）
+        // 启动定时器
         SetTimer(hWnd, 1, 1000, nullptr);
 
-        // --- "确定(&O)" 按钮（默认不可用） ---
+        // --- "确定(&O)" 按钮 ---
         hChild = CreateWindowW(L"BUTTON", L"确定(&O)",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED | WS_TABSTOP,
-            340, 475, 85, 28,
+            Scale(390), Scale(410), Scale(85), Scale(28),
             hWnd, (HMENU)IDC_BTN_OK, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "取消(&C)" 按钮 ---
         hChild = CreateWindowW(L"BUTTON", L"取消(&C)",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-            435, 475, 85, 28,
+            Scale(485), Scale(410), Scale(85), Scale(28),
             hWnd, (HMENU)IDC_BTN_CANCEL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "清除历史(&R)" 按钮 ---
         hChild = CreateWindowW(L"BUTTON", L"清除历史(&R)",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-            20, 475, 100, 28,
+            Scale(20), Scale(410), Scale(100), Scale(28),
             hWnd, (HMENU)IDC_BTN_CLEAR_HISTORY, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1203,22 +1219,21 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 
     case WM_CTLCOLORSTATIC:
     {
-        // 仅对"密钥格式错误"提示设置红色文字，不干预背景色
+        HDC hdcStatic = (HDC)wParam;
         HWND hCtrl = (HWND)lParam;
+
+        // "密钥格式错误"提示使用红色文字
         if (hCtrl == GetDlgItem(hWnd, IDC_STATIC_API_HINT))
-        {
-            HDC hdcStatic = (HDC)wParam;
             SetTextColor(hdcStatic, RGB(0xE0, 0x10, 0x10));
-            SetBkMode(hdcStatic, TRANSPARENT);
-            return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
-        }
-        break;
+
+        // 所有 STATIC 控件透明背景，与对话框底色一致
+        SetBkMode(hdcStatic, TRANSPARENT);
+        return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
     }
 
     case WM_TIMER:
     {
-        // 定时刷新 ListView，自动反映新增的历史记录
-        if (wParam == 1 && pData)
+        if (wParam == 1 && pData && pData->autoRefresh)
         {
             HWND hList = GetDlgItem(hWnd, IDC_LIST_HISTORY);
             if (hList)
@@ -1280,6 +1295,14 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, buf, DSDB_BUF_APIKEY);
                 bool apiValid = IsValidApiKey(buf);
                 UpdateApiDependentControls(hWnd, buf[0] != L'\0', apiValid, pData->apiTested);
+            }
+            break;
+
+        case IDC_CHECK_AUTO_REFRESH:
+            if (code == BN_CLICKED && pData)
+            {
+                pData->autoRefresh = (SendMessageW(
+                    GetDlgItem(hWnd, IDC_CHECK_AUTO_REFRESH), BM_GETCHECK, 0, 0) == BST_CHECKED);
             }
             break;
 
@@ -1461,6 +1484,65 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         break;
     }
 
+    case WM_GETMINMAXINFO:
+    {
+        MINMAXINFO* pInfo = (MINMAXINFO*)lParam;
+        pInfo->ptMinTrackSize.x = Scale(610);
+        pInfo->ptMinTrackSize.y = Scale(400);
+        return 0;
+    }
+
+    case WM_SIZE:
+    {
+        int cx = LOWORD(lParam);
+        int cy = HIWORD(lParam);
+
+        if (cx > 0 && cy > 0)
+        {
+            // 按钮距底部固定 57px（28 + 29 margin）
+            int btnY = cy - Scale(43);
+
+            // OK 按钮：右侧与取消按钮间距 10px
+            HWND hBtn = GetDlgItem(hWnd, IDC_BTN_OK);
+            if (hBtn)
+                SetWindowPos(hBtn, nullptr, cx - Scale(200), btnY, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+
+            // 取消按钮：右侧与表格右侧齐平
+            hBtn = GetDlgItem(hWnd, IDC_BTN_CANCEL);
+            if (hBtn)
+                SetWindowPos(hBtn, nullptr, cx - Scale(105), btnY, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+
+            // 清除历史按钮：左对齐
+            hBtn = GetDlgItem(hWnd, IDC_BTN_CLEAR_HISTORY);
+            if (hBtn)
+                SetWindowPos(hBtn, nullptr, Scale(20), btnY, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+
+            // ListView：拉伸填充
+            HWND hList = GetDlgItem(hWnd, IDC_LIST_HISTORY);
+            if (hList)
+            {
+                int listWidth = cx - Scale(40);
+                int listHeight = btnY - Scale(228) - Scale(8);
+                if (listWidth < Scale(200)) listWidth = Scale(200);
+                if (listHeight < Scale(80)) listHeight = Scale(80);
+                SetWindowPos(hList, nullptr, 0, 0, listWidth, listHeight, SWP_NOMOVE | SWP_NOZORDER);
+            }
+        }
+        return 0;
+    }
+
+    case WM_NOTIFY:
+    {
+        NMHDR* pNm = (NMHDR*)lParam;
+        if (pNm->idFrom == IDC_LIST_HISTORY && pNm->code == NM_CLICK && pData && pData->autoRefresh)
+        {
+            // 用户点击表格 → 取消自动刷新
+            SendMessageW(GetDlgItem(hWnd, IDC_CHECK_AUTO_REFRESH), BM_SETCHECK, BST_UNCHECKED, 0);
+            pData->autoRefresh = false;
+        }
+        return 0;
+    }
+
     case WM_CLOSE:
         if (pData)
         {
@@ -1503,6 +1585,11 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
 {
     HINSTANCE hInst = GetModuleHandle(nullptr);
 
+    // 获取系统 DPI 用于缩放
+    HDC hdc = GetDC(nullptr);
+    g_dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+    ReleaseDC(nullptr, hdc);
+
     // 初始化公共控件（ListView 需要 ICC_LISTVIEW_CLASSES）
     static bool s_bCcInit = false;
     if (!s_bCcInit)
@@ -1537,8 +1624,8 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
     dlgData.changed = false;
 
     // 计算居中位置（窗口扩大以容纳历史记录 ListView）
-    int dlgWidth = 560;
-    int dlgHeight = 560;
+    int dlgWidth = Scale(610);
+    int dlgHeight = Scale(480);
     int x = CW_USEDEFAULT;
     int y = CW_USEDEFAULT;
     HWND hParentWnd = (HWND)hParent;
@@ -1550,10 +1637,10 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
         y = parentRect.top + ((parentRect.bottom - parentRect.top) - dlgHeight) / 2;
     }
 
-    // 创建对话框窗口（WS_EX_CLIENTEDGE 提供现代凹陷边框）
+    // 创建对话框窗口（可调大小、可最大化）
     HWND hDlg = CreateWindowExW(
         WS_EX_CLIENTEDGE, SETTINGS_DIALOG_CLASS, L"DeepSeek 设置",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX,
         x, y, dlgWidth, dlgHeight,
         hParentWnd, nullptr, hInst, &dlgData);
 
