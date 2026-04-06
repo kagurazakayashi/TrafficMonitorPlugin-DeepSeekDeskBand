@@ -113,6 +113,9 @@ public:
      *  @param fullRewrite true=整体加密重写；false=仅追加最后一条 */
     void SaveHistory(bool fullRewrite);
 
+    /** @brief 异步 API 请求线程过程（静态，访问单例） */
+    static DWORD WINAPI ApiRequestThreadProc(LPVOID lpParam);
+
 private:
     /** @brief 私有构造函数，防止外部直接创建实例 */
     CDeepSeekDeskBand();
@@ -143,6 +146,21 @@ private:
 
     /** @brief 是否有有效的余额数据可供显示 */
     bool m_hasBalance = false;
+
+    /** @brief API 请求是否正在进行中 */
+    bool m_requestInProgress = false;
+
+    /** @brief 请求线程句柄 */
+    HANDLE m_hRequestThread = nullptr;
+
+    /** @brief 异步请求的待处理结果 */
+    ApiTestResult m_pendingResult;
+
+    /** @brief 待处理结果是否就绪 */
+    bool m_pendingResultReady = false;
+
+    /** @brief 线程安全临界区 */
+    CRITICAL_SECTION m_csRequest;
 
     /** @brief 历史记录列表（内存缓存） */
     std::vector<HistoryRecord> m_historyRecords;

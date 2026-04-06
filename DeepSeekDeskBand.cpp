@@ -17,8 +17,10 @@
 #include <string>
 #include <CommCtrl.h>
 #include <dpapi.h>
+#include <urlmon.h>
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "crypt32.lib")
+#pragma comment(lib, "urlmon.lib")
 
 // ============================================================
 // CDeepSeekDeskBandItem 实现 —— 显示项目
@@ -101,6 +103,7 @@ CDeepSeekDeskBand::CDeepSeekDeskBand()
     , m_requestTimeout(DSDB_DEFAULT_TIMEOUT)
 {
     m_apiKey[0] = L'\0';
+    InitializeCriticalSection(&m_csRequest);
 }
 
 /**
@@ -126,13 +129,88 @@ IPluginItem* CDeepSeekDeskBand::GetItem(int index)
 }
 
 /**
+ * @brief 异步 API 请求线程过程
+ * @details 在独立线程中调用 TestDeepSeekApi，完成后通过临界区传回结果。
+ *          主线程在 DataRequired() 中检查并处理结果。
+ */
+DWORD WINAPI CDeepSeekDeskBand::ApiRequestThreadProc(LPVOID /*lpParam*/)
+{
+    CDeepSeekDeskBand& plugin = CDeepSeekDeskBand::Instance();
+
+    // 复制请求参数（避免线程间竞争）
+    wchar_t apiKey[DSDB_BUF_APIKEY];
+    int timeout;
+    EnterCriticalSection(&plugin.m_csRequest);
+    wcscpy_s(apiKey, plugin.m_apiKey);
+    timeout = plugin.m_requestTimeout;
+    LeaveCriticalSection(&plugin.m_csRequest);
+
+    Logger_Log(L"ApiRequestThread: 开始请求 (timeout=%ds)", timeout);
+
+    // 执行阻塞的网络调用
+    ApiTestResult result = TestDeepSeekApi(apiKey, timeout);
+
+    if (result.success)
+        Logger_Log(L"ApiRequestThread: 请求成功 total=%s %s",
+            result.total_balance.c_str(), result.currency.c_str());
+    else
+        Logger_Log(L"ApiRequestThread: 请求失败 err=\"%s\" http=%d",
+            result.error_message.c_str(), result.http_status_code);
+
+    // 传回结果并标记完成
+    EnterCriticalSection(&plugin.m_csRequest);
+    plugin.m_pendingResult = result;
+    plugin.m_pendingResultReady = true;
+    LeaveCriticalSection(&plugin.m_csRequest);
+
+    return 0;
+}
+
+/**
  * @brief 定时数据获取
  * @details 由主程序每隔一定时间调用。
- *          按设定的更新间隔调用 DeepSeek API 查询余额，结果缓存显示。
+ *          检查是否有异步请求完成，按设定的更新间隔启动新请求。
+ *          结果缓存显示，不阻塞主线程。
  */
 void CDeepSeekDeskBand::DataRequired()
 {
-    // API 密钥为空 → 显示 "--"
+    // ---- 处理已完成异步请求的结果 ----
+    if (m_requestInProgress)
+    {
+        EnterCriticalSection(&m_csRequest);
+        if (m_pendingResultReady)
+        {
+            ApiTestResult result = m_pendingResult;
+            m_pendingResultReady = false;
+            m_requestInProgress = false;
+
+            // 关闭线程句柄
+            if (m_hRequestThread)
+            {
+                CloseHandle(m_hRequestThread);
+                m_hRequestThread = nullptr;
+            }
+            LeaveCriticalSection(&m_csRequest);
+
+            if (result.success)
+            {
+                m_lastBalanceResult = result;
+                m_hasBalance = true;
+                m_lastFetchTime = GetTickCount64();
+                AppendHistoryRecord(result);
+            }
+            else
+            {
+                m_hasBalance = false;
+            }
+        }
+        else
+        {
+            LeaveCriticalSection(&m_csRequest);
+        }
+    }
+
+    // ---- 更新显示文本 ----
     if (m_apiKey[0] == L'\0')
     {
         if (m_hasBalance)
@@ -141,38 +219,8 @@ void CDeepSeekDeskBand::DataRequired()
             m_hasBalance = false;
         }
         m_item.SetValueText(L"--");
-        return;
     }
-
-    ULONGLONG now = GetTickCount64();
-    ULONGLONG intervalMs = static_cast<ULONGLONG>(m_updateInterval) * 1000;
-
-    // 到达更新周期时发起 API 请求
-    if (m_lastFetchTime == 0 || (now - m_lastFetchTime) >= intervalMs)
-    {
-        Logger_Log(L"DataRequired: 开始获取余额 (interval=%ds timeout=%ds)",
-            m_updateInterval, m_requestTimeout);
-        ApiTestResult result = TestDeepSeekApi(m_apiKey, m_requestTimeout);
-
-        if (result.success)
-        {
-            Logger_Log(L"DataRequired: 获取成功 total=%s %s",
-                result.total_balance.c_str(), result.currency.c_str());
-            m_lastBalanceResult = result;
-            m_hasBalance = true;
-            m_lastFetchTime = now;
-            AppendHistoryRecord(result);
-        }
-        else
-        {
-            Logger_Log(L"DataRequired: 获取失败 err=\"%s\" http=%d",
-                result.error_message.c_str(), result.http_status_code);
-            m_hasBalance = false;
-        }
-    }
-
-    // 更新显示文本
-    if (m_hasBalance)
+    else if (m_hasBalance)
     {
         wchar_t valueText[DSDB_BUF_VALUE];
         swprintf_s(valueText, L"%s %s",
@@ -183,6 +231,28 @@ void CDeepSeekDeskBand::DataRequired()
     else
     {
         m_item.SetValueText(L"--");
+    }
+
+    // ---- 按间隔启动新的异步请求 ----
+    if (!m_requestInProgress && m_apiKey[0] != L'\0')
+    {
+        ULONGLONG now = GetTickCount64();
+        ULONGLONG intervalMs = static_cast<ULONGLONG>(m_updateInterval) * 1000;
+
+        if (m_lastFetchTime == 0 || (now - m_lastFetchTime) >= intervalMs)
+        {
+            Logger_Log(L"DataRequired: 启动异步 API 请求 (interval=%ds)", m_updateInterval);
+
+            m_requestInProgress = true;
+            HANDLE hThread = CreateThread(nullptr, 0, ApiRequestThreadProc, nullptr, 0, nullptr);
+            if (hThread)
+                m_hRequestThread = hThread;
+            else
+            {
+                m_requestInProgress = false;
+                Logger_Log(L"DataRequired: 创建请求线程失败");
+            }
+        }
     }
 }
 
@@ -857,7 +927,46 @@ enum
     IDC_LIST_HISTORY        = 1013,   // 历史记录 ListView 控件
     IDC_BTN_CLEAR_HISTORY   = 1014,   // 清除历史按钮
     IDC_CHECK_AUTO_REFRESH  = 1015,   // 自动刷新复选框
+    IDC_STATIC_ICON         = 1016,   // DeepSeek 图标
 };
+
+/** @brief 图标下载完成的自定义消息 */
+#define WM_ICON_DOWNLOADED  (WM_APP + 1)
+
+/** @brief 图标异步下载线程参数 */
+struct IconDownloadParam
+{
+    HWND    hWnd;           ///< 对话框窗口句柄
+    wchar_t path[512];      ///< 图标保存路径
+};
+
+/**
+ * @brief 异步下载图标线程过程
+ */
+static DWORD WINAPI DownloadIconThreadProc(LPVOID lpParam)
+{
+    IconDownloadParam* p = static_cast<IconDownloadParam*>(lpParam);
+
+    // 下载图标文件（阻塞，但在独立线程中）
+    HRESULT hr = URLDownloadToFileW(nullptr,
+        L"https://www.deepseek.com/favicon.ico",
+        p->path, 0, nullptr);
+
+    if (SUCCEEDED(hr))
+    {
+        Logger_Log(L"DownloadIconThread: 下载成功 \"%s\"", p->path);
+    }
+    else
+    {
+        Logger_Log(L"DownloadIconThread: 下载失败 hr=0x%08X", hr);
+    }
+
+    // 通知对话框刷新图标（无论成功与否，让对话框尝试加载）
+    PostMessageW(p->hWnd, WM_ICON_DOWNLOADED, SUCCEEDED(hr) ? 1 : 0, 0);
+
+    delete p;
+    return 0;
+}
 
 /**
  * @brief 设置对话框数据
@@ -879,6 +988,7 @@ struct SettingsDlgData
     bool    autoRefresh;               // 列表是否自动刷新（默认 true）
     bool    changed;                  // 是否有未保存的变更
     bool    apiTested;                // API 是否已通过测试
+    wchar_t iconPath[512];            // DeepSeek 图标文件路径
 };
 
 /**
@@ -1018,45 +1128,61 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 
         HWND hChild;
 
+        // --- DeepSeek 图标（顶部居中，32x32 DPI 适配） ---
+        // 始终创建图标控件（即使文件尚未下载），异步下载完成后由 WM_ICON_DOWNLOADED 填充
+        hChild = CreateWindowW(L"STATIC", nullptr,
+            WS_CHILD | WS_VISIBLE | SS_ICON,
+            Scale(280), Scale(8), 0, 0,
+            hWnd, (HMENU)IDC_STATIC_ICON, hInst, nullptr);
+        HICON hIcon = (HICON)LoadImageW(nullptr, pData->iconPath, IMAGE_ICON,
+            Scale(32), Scale(32), LR_LOADFROMFILE);
+        if (hIcon)
+        {
+            SendMessageW(hChild, STM_SETICON, (WPARAM)hIcon, 0);
+            // 设为窗口图标
+            SendMessageW(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)hIcon);
+            SendMessageW(hWnd, WM_SETICON, ICON_BIG, (LPARAM)hIcon);
+        }
+
         // --- "DeepSeek API:" 标签 ---
         hChild = CreateWindowW(L"STATIC", L"DeepSeek API:",
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            Scale(20), Scale(22), Scale(110), Scale(20),
+            Scale(20), Scale(72), Scale(110), Scale(20),
             hWnd, nullptr, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- API 密钥输入框 ---
         hChild = CreateWindowW(L"EDIT", pData->apiKey,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(135), Scale(19), Scale(375), Scale(22),
+            Scale(135), Scale(69), Scale(375), Scale(22),
             hWnd, (HMENU)IDC_EDIT_API_KEY, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- API 格式校验提示 ---
         hChild = CreateWindowW(L"STATIC", L"密钥格式错误：必须以 sk- 开头，后跟32位小写字母和数字",
             WS_CHILD | SS_LEFT,
-            Scale(135), Scale(44), Scale(375), Scale(16),
+            Scale(135), Scale(94), Scale(375), Scale(16),
             hWnd, (HMENU)IDC_STATIC_API_HINT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "测试API(&T)" 按钮 ---
         hChild = CreateWindowW(L"BUTTON", L"测试API(&T)",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-            Scale(135), Scale(74), Scale(90), Scale(24),
+            Scale(135), Scale(124), Scale(90), Scale(24),
             hWnd, (HMENU)IDC_BTN_TEST_API, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 测试结果状态文本 ---
         hChild = CreateWindowW(L"STATIC", L"< 请先测试再保存",
             WS_CHILD | WS_VISIBLE | SS_LEFT,
-            Scale(235), Scale(77), Scale(280), Scale(20),
+            Scale(235), Scale(127), Scale(280), Scale(20),
             hWnd, (HMENU)IDC_STATIC_STATUS, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "更新间隔（秒）:" 标签 ---
         hChild = CreateWindowW(L"STATIC", L"更新间隔（秒）:",
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            Scale(20), Scale(124), Scale(110), Scale(20),
+            Scale(20), Scale(174), Scale(110), Scale(20),
             hWnd, nullptr, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1065,7 +1191,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         swprintf_s(bufInterval, L"%d", pData->updateInterval);
         hChild = CreateWindowW(L"EDIT", bufInterval,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(135), Scale(121), Scale(100), Scale(22),
+            Scale(135), Scale(171), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_INTERVAL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1081,7 +1207,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         // --- "请求超时（秒）:" 标签 ---
         hChild = CreateWindowW(L"STATIC", L"请求超时（秒）:",
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            Scale(290), Scale(124), Scale(110), Scale(20),
+            Scale(290), Scale(174), Scale(110), Scale(20),
             hWnd, nullptr, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1090,7 +1216,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         swprintf_s(bufTimeout, L"%d", pData->requestTimeout);
         hChild = CreateWindowW(L"EDIT", bufTimeout,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(405), Scale(121), Scale(100), Scale(22),
+            Scale(405), Scale(171), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_TIMEOUT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1108,7 +1234,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         // --- "历史记录数量:" 标签 ---
         hChild = CreateWindowW(L"STATIC", L"历史记录数量:",
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            Scale(20), Scale(174), Scale(110), Scale(20),
+            Scale(20), Scale(224), Scale(110), Scale(20),
             hWnd, nullptr, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1117,7 +1243,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         swprintf_s(bufHistoryCount, L"%d", pData->maxHistoryCount);
         hChild = CreateWindowW(L"EDIT", bufHistoryCount,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(135), Scale(171), Scale(100), Scale(22),
+            Scale(135), Scale(221), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_HISTORY_COUNT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1135,7 +1261,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         // --- "自动刷新" 复选框 ---
         hChild = CreateWindowW(L"BUTTON", L"自动刷新",
             WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
-            Scale(260), Scale(173), Scale(90), Scale(22),
+            Scale(260), Scale(223), Scale(90), Scale(22),
             hWnd, (HMENU)IDC_CHECK_AUTO_REFRESH, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
         SendMessageW(hChild, BM_SETCHECK, BST_CHECKED, 0);
@@ -1144,7 +1270,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         // --- "历史记录:" 标签 ---
         hChild = CreateWindowW(L"STATIC", L"历史记录:",
             WS_CHILD | WS_VISIBLE | SS_LEFT,
-            Scale(20), Scale(206), Scale(80), Scale(20),
+            Scale(20), Scale(256), Scale(80), Scale(20),
             hWnd, nullptr, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1153,7 +1279,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             HWND hList = CreateWindowW(WC_LISTVIEWW, nullptr,
                 WS_CHILD | WS_VISIBLE | WS_BORDER | LVS_REPORT | LVS_SINGLESEL |
                 LVS_SHOWSELALWAYS | WS_TABSTOP,
-                Scale(20), Scale(228), Scale(550), Scale(170),
+                Scale(20), Scale(278), Scale(550), Scale(170),
                 hWnd, (HMENU)IDC_LIST_HISTORY, hInst, nullptr);
             SendMessageW(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1186,21 +1312,21 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         // --- "确定(&O)" 按钮 ---
         hChild = CreateWindowW(L"BUTTON", L"确定(&O)",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED | WS_TABSTOP,
-            Scale(390), Scale(410), Scale(85), Scale(28),
+            Scale(390), Scale(460), Scale(85), Scale(28),
             hWnd, (HMENU)IDC_BTN_OK, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "取消(&C)" 按钮 ---
         hChild = CreateWindowW(L"BUTTON", L"取消(&C)",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-            Scale(485), Scale(410), Scale(85), Scale(28),
+            Scale(485), Scale(460), Scale(85), Scale(28),
             hWnd, (HMENU)IDC_BTN_CANCEL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "清除历史(&R)" 按钮 ---
         hChild = CreateWindowW(L"BUTTON", L"清除历史(&R)",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-            Scale(20), Scale(410), Scale(100), Scale(28),
+            Scale(20), Scale(460), Scale(100), Scale(28),
             hWnd, (HMENU)IDC_BTN_CLEAR_HISTORY, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1229,6 +1355,27 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         // 所有 STATIC 控件透明背景，与对话框底色一致
         SetBkMode(hdcStatic, TRANSPARENT);
         return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
+    }
+
+    case WM_ICON_DOWNLOADED:
+    {
+        // 异步下载完成，尝试加载图标
+        if (wParam != 0 && pData)
+        {
+            HICON hNewIcon = (HICON)LoadImageW(nullptr, pData->iconPath, IMAGE_ICON,
+                Scale(32), Scale(32), LR_LOADFROMFILE);
+            if (hNewIcon)
+            {
+                // 更新静态图标控件
+                HWND hIconCtrl = GetDlgItem(hWnd, IDC_STATIC_ICON);
+                if (hIconCtrl)
+                    SendMessageW(hIconCtrl, STM_SETICON, (WPARAM)hNewIcon, 0);
+                // 设为窗口图标
+                SendMessageW(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)hNewIcon);
+                SendMessageW(hWnd, WM_SETICON, ICON_BIG, (LPARAM)hNewIcon);
+            }
+        }
+        return 0;
     }
 
     case WM_TIMER:
@@ -1426,6 +1573,15 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 if (pData->requestTimeout > DSDB_TIMEOUT_MAX)
                     pData->requestTimeout = DSDB_TIMEOUT_MAX;
 
+                // 更新间隔必须大于请求超时
+                if (pData->updateInterval <= pData->requestTimeout)
+                {
+                    MessageBoxW(hWnd,
+                        L"更新间隔必须大于请求超时时间，\n否则上一个请求未完成就会发起下一个请求。",
+                        L"参数错误", MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+
                 wchar_t bufHistoryCount[DSDB_BUF_NUMBER];
                 GetDlgItemTextW(hWnd, IDC_EDIT_HISTORY_COUNT, bufHistoryCount, DSDB_BUF_NUMBER);
                 pData->maxHistoryCount = _wtoi(bufHistoryCount);
@@ -1488,7 +1644,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     {
         MINMAXINFO* pInfo = (MINMAXINFO*)lParam;
         pInfo->ptMinTrackSize.x = Scale(610);
-        pInfo->ptMinTrackSize.y = Scale(400);
+        pInfo->ptMinTrackSize.y = Scale(460);
         return 0;
     }
 
@@ -1522,7 +1678,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             if (hList)
             {
                 int listWidth = cx - Scale(40);
-                int listHeight = btnY - Scale(228) - Scale(8);
+                int listHeight = btnY - Scale(278) - Scale(8);
                 if (listWidth < Scale(200)) listWidth = Scale(200);
                 if (listHeight < Scale(80)) listHeight = Scale(80);
                 SetWindowPos(hList, nullptr, 0, 0, listWidth, listHeight, SWP_NOMOVE | SWP_NOZORDER);
@@ -1622,10 +1778,27 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
     dlgData.historyRecords = &m_historyRecords;
     dlgData.historyCleared = false;
     dlgData.changed = false;
+    dlgData.apiTested = false;
+
+    // 准备图标路径并下载（如不存在）
+    IconDownloadParam* pIconParam = nullptr;
+    {
+        std::wstring iconFile = std::wstring(m_pApp->GetPluginConfigDir()) + L"\\DeepSeekLogo.ico";
+        wcsncpy_s(dlgData.iconPath, iconFile.c_str(), 511);
+        dlgData.iconPath[511] = L'\0';
+
+        // 记录是否需要异步下载（稍后对话框创建后启动线程）
+        if (GetFileAttributesW(iconFile.c_str()) == INVALID_FILE_ATTRIBUTES)
+        {
+            Logger_Log(L"图标文件不存在，稍后启动异步下载");
+            pIconParam = new IconDownloadParam();
+            wcsncpy_s(pIconParam->path, dlgData.iconPath, 511);
+        }
+    }
 
     // 计算居中位置（窗口扩大以容纳历史记录 ListView）
     int dlgWidth = Scale(610);
-    int dlgHeight = Scale(480);
+    int dlgHeight = Scale(540);
     int x = CW_USEDEFAULT;
     int y = CW_USEDEFAULT;
     HWND hParentWnd = (HWND)hParent;
@@ -1645,7 +1818,26 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
         hParentWnd, nullptr, hInst, &dlgData);
 
     if (!hDlg)
+    {
+        delete pIconParam;
         return OR_OPTION_NOT_PROVIDED;
+    }
+
+    // 若图标文件不存在，现在启动异步下载（hDlg 已知）
+    if (pIconParam)
+    {
+        pIconParam->hWnd = hDlg;
+        HANDLE hThread = CreateThread(nullptr, 0, DownloadIconThreadProc,
+            pIconParam, 0, nullptr);
+        if (hThread)
+            CloseHandle(hThread);
+        else
+        {
+            delete pIconParam;
+            pIconParam = nullptr;
+            Logger_Log(L"创建下载线程失败");
+        }
+    }
 
     // 禁用父窗口以实现模态效果
     if (hParentWnd)
