@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <cstdint>
+#include <math.h>
 #include <fstream>
 #include <vector>
 #include <string>
@@ -846,21 +847,35 @@ void CDeepSeekDeskBand::AppendHistoryRecord(const ApiTestResult& result)
         return;
     }
 
+    // 只有余额发生实际变动时才记录
+    double newTotal   = _wtof(result.total_balance.c_str());
+    double newGranted = _wtof(result.granted_balance.c_str());
+    double newTopped  = _wtof(result.topped_up_balance.c_str());
+    if (!m_historyRecords.empty())
+    {
+        const HistoryRecord& last = m_historyRecords.back();
+        if (fabs(newTotal   - last.total_balance)   < 0.001 &&
+            fabs(newGranted - last.granted_balance) < 0.001 &&
+            fabs(newTopped  - last.topped_up_balance) < 0.001)
+        {
+            Logger_Log(L"AppendHistoryRecord: 余额未变动 (total=%.2f)，跳过记录", newTotal);
+            return;
+        }
+    }
+
     // 构造历史记录
     HistoryRecord rec = {};
     FILETIME ft;
     GetSystemTimeAsFileTime(&ft);
-    // FILETIME -> Unix 毫秒时间戳
     ULARGE_INTEGER uli;
     uli.LowPart = ft.dwLowDateTime;
     uli.HighPart = ft.dwHighDateTime;
-    // FILETIME 从 1601-01-01 起，100ns 单位；Unix 从 1970-01-01 起
     rec.timestamp = static_cast<int64_t>((uli.QuadPart - 116444736000000000ULL) / 10000ULL);
 
     rec.is_available = result.is_available ? 1 : 0;
-    rec.total_balance = _wtof(result.total_balance.c_str());
-    rec.granted_balance = _wtof(result.granted_balance.c_str());
-    rec.topped_up_balance = _wtof(result.topped_up_balance.c_str());
+    rec.total_balance = newTotal;
+    rec.granted_balance = newGranted;
+    rec.topped_up_balance = newTopped;
     wcsncpy_s(rec.currency, result.currency.c_str(), 7);
     rec.currency[7] = L'\0';
 
@@ -1268,7 +1283,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         pData->autoRefresh = true;
 
         // --- "历史记录:" 标签 ---
-        hChild = CreateWindowW(L"STATIC", L"历史记录:",
+        hChild = CreateWindowW(L"STATIC", L"历史变化记录:",
             WS_CHILD | WS_VISIBLE | SS_LEFT,
             Scale(20), Scale(256), Scale(80), Scale(20),
             hWnd, nullptr, hInst, nullptr);
