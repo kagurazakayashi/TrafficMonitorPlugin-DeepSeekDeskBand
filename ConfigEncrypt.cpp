@@ -31,10 +31,11 @@ static std::vector<uint8_t> SerializeConfig(const ConfigBlob& config)
     };
 
     push32(DSDB_CONFIG_MAGIC);
-    push32(2);  // version（版本 2：新增 maxHistoryCount 字段）
+    push32(3);  // version（版本 3：新增 language 字段）
     push32(config.updateInterval);
     push32(config.requestTimeout);
     push32(config.maxHistoryCount);
+    push32(config.language);
 
     int32_t apiKeyByteLen = static_cast<int32_t>((config.apiKey.size() + 1) * sizeof(wchar_t));
     push32(apiKeyByteLen);
@@ -50,6 +51,7 @@ static std::vector<uint8_t> SerializeConfig(const ConfigBlob& config)
  */
 static bool DeserializeConfig(const std::vector<uint8_t>& data, ConfigBlob& config)
 {
+    // v2 最小 24 字节, v3 最小 28 字节
     if (data.size() < 24)
         return false;
 
@@ -63,21 +65,25 @@ static bool DeserializeConfig(const std::vector<uint8_t>& data, ConfigBlob& conf
 
     if (read32(0) != DSDB_CONFIG_MAGIC)
         return false;
-    if (read32(4) != 2)
+
+    int32_t version = read32(4);
+    if (version < 2 || version > 3)
         return false;
 
     config.updateInterval = read32(8);
     config.requestTimeout = read32(12);
-    config.maxHistoryCount = read32(16);     // 版本 1 新增字段
-    int32_t apiKeyByteLen = read32(20);
+    config.maxHistoryCount = read32(16);
+    config.language = (version >= 3) ? read32(20) : 0;   // v2 兼容：默认自动
+    int32_t apiKeyByteLen = (version >= 3) ? read32(24) : read32(20);
 
     if (apiKeyByteLen < 2 || apiKeyByteLen % 2 != 0)
         return false;
-    if (data.size() < static_cast<size_t>(24) + apiKeyByteLen)
+    if (data.size() < static_cast<size_t>((version >= 3 ? 28 : 24)) + apiKeyByteLen)
         return false;
 
     int32_t wcharCount = apiKeyByteLen / static_cast<int32_t>(sizeof(wchar_t));
-    const wchar_t* keyPtr = reinterpret_cast<const wchar_t*>(data.data() + 24);
+    const wchar_t* keyPtr = reinterpret_cast<const wchar_t*>(
+        data.data() + (version >= 3 ? 28 : 24));
     config.apiKey.assign(keyPtr, wcharCount);
 
     if (!config.apiKey.empty() && config.apiKey.back() != L'\0')
@@ -151,7 +157,8 @@ bool ConfigDecrypt(const std::vector<uint8_t>& encrypted, ConfigBlob& outConfig)
         return false;
     }
 
-    Logger_Log(L"ConfigDecrypt: 反序列化成功 interval=%d timeout=%d maxHistory=%d apiKey=\"%s\"",
-        outConfig.updateInterval, outConfig.requestTimeout, outConfig.maxHistoryCount, outConfig.apiKey.c_str());
+    Logger_Log(L"ConfigDecrypt: 反序列化成功 interval=%d timeout=%d maxHistory=%d language=%d apiKey=\"%s\"",
+        outConfig.updateInterval, outConfig.requestTimeout, outConfig.maxHistoryCount,
+        outConfig.language, outConfig.apiKey.c_str());
     return true;
 }

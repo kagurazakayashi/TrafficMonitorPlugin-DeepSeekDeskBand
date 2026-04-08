@@ -8,6 +8,7 @@
 #include "ConfigEncrypt.h"
 #include "HttpClient.h"
 #include "Logger.h"
+#include "Strings.h"
 #include "framework.h"
 #include <string.h>
 #include <stdio.h>
@@ -51,7 +52,7 @@ void CDeepSeekDeskBandItem::SetValueText(const wchar_t* text)
  */
 const wchar_t* CDeepSeekDeskBandItem::GetItemName() const
 {
-    return L"DeepSeek 助手";
+    return Strings_Get(StringKey::ITEM_NAME);
 }
 
 /**
@@ -269,7 +270,7 @@ const wchar_t* CDeepSeekDeskBand::GetInfo(PluginInfoIndex index)
     case TMI_NAME:          // 插件名称
         return DSDB_NAME;
     case TMI_DESCRIPTION:   // 插件功能描述
-        return DSDB_DESCRIPTION;
+        return Strings_Get(StringKey::PLUGIN_DESCRIPTION);
     case TMI_AUTHOR:        // 作者
         return DSDB_AUTHOR;
     case TMI_COPYRIGHT:     // 版权信息
@@ -467,8 +468,9 @@ void CDeepSeekDeskBand::LoadConfig()
         return;
     }
 
-    Logger_Log(L"LoadConfig: 解密成功 updateInterval=%d requestTimeout=%d maxHistory=%d apiKey=\"%s\"",
-        blob.updateInterval, blob.requestTimeout, blob.maxHistoryCount, blob.apiKey.c_str());
+    Logger_Log(L"LoadConfig: 解密成功 updateInterval=%d requestTimeout=%d maxHistory=%d language=%d apiKey=\"%s\"",
+        blob.updateInterval, blob.requestTimeout, blob.maxHistoryCount,
+        blob.language, blob.apiKey.c_str());
 
     // 将解密结果应用到成员变量
     wcsncpy_s(m_apiKey, blob.apiKey.c_str(), DSDB_BUF_APIKEY - 1);
@@ -489,6 +491,13 @@ void CDeepSeekDeskBand::LoadConfig()
         m_maxHistoryCount = DSDB_HISTORY_COUNT_MIN;
     if (m_maxHistoryCount > DSDB_HISTORY_COUNT_MAX)
         m_maxHistoryCount = DSDB_HISTORY_COUNT_MAX;
+
+    // 语言偏好（0=Auto, 1=简中, 2=繁中, 3=日语, 4=英语）
+    Language lang = static_cast<Language>(blob.language);
+    if (lang < Language::Auto || lang > Language::English)
+        lang = Language::Auto;
+    m_language = lang;
+    Strings_SetLanguage(m_language);
 
     Logger_Log(L"LoadConfig: 应用后 updateInterval=%d requestTimeout=%d maxHistory=%d apiKey[0]='%c'",
         m_updateInterval, m_requestTimeout, m_maxHistoryCount,
@@ -515,10 +524,12 @@ void CDeepSeekDeskBand::SaveConfig()
     blob.updateInterval = m_updateInterval;
     blob.requestTimeout = m_requestTimeout;
     blob.maxHistoryCount = m_maxHistoryCount;
+    blob.language = static_cast<int32_t>(m_language);
     blob.apiKey = m_apiKey;
 
-    Logger_Log(L"SaveConfig: interval=%d timeout=%d maxHistory=%d apiKey=\"%s\"",
-        blob.updateInterval, blob.requestTimeout, blob.maxHistoryCount, blob.apiKey.c_str());
+    Logger_Log(L"SaveConfig: interval=%d timeout=%d maxHistory=%d language=%d apiKey=\"%s\"",
+        blob.updateInterval, blob.requestTimeout, blob.maxHistoryCount,
+        blob.language, blob.apiKey.c_str());
 
     // 加密
     std::vector<uint8_t> encrypted;
@@ -906,9 +917,9 @@ void CDeepSeekDeskBand::OnInitialize(ITrafficMonitor* pApp)
     Logger_Log(L"OnInitialize: pApp=%p, GetPluginConfigDir()=\"%s\"",
         pApp, pApp ? pApp->GetPluginConfigDir() : L"(null)");
     LoadConfig();
-    Logger_Log(L"加载配置完成: apiKey[0]='%c' updateInterval=%d requestTimeout=%d maxHistory=%d historyCount=%zu",
+    Logger_Log(L"加载配置完成: apiKey[0]='%c' updateInterval=%d requestTimeout=%d maxHistory=%d historyCount=%zu language=%d",
         (m_apiKey[0] ? m_apiKey[0] : L'-'), m_updateInterval, m_requestTimeout,
-        m_maxHistoryCount, m_historyRecords.size());
+        m_maxHistoryCount, m_historyRecords.size(), static_cast<int>(m_language));
 }
 
 // ============================================================
@@ -943,6 +954,13 @@ enum
     IDC_BTN_CLEAR_HISTORY   = 1014,   // 清除历史按钮
     IDC_CHECK_AUTO_REFRESH  = 1015,   // 自动刷新复选框
     IDC_STATIC_ICON         = 1016,   // DeepSeek 图标
+    IDC_COMBO_LANGUAGE      = 1017,   // 显示语言下拉框
+    IDC_STATIC_API_LABEL    = 1018,   // API 密钥标签
+    IDC_STATIC_INTERVAL_LABEL = 1019, // 更新间隔标签
+    IDC_STATIC_TIMEOUT_LABEL  = 1020, // 请求超时标签
+    IDC_STATIC_HISTORY_COUNT_LABEL = 1021, // 历史记录数量标签
+    IDC_STATIC_HISTORY_LABEL = 1022, // 历史记录标签
+    IDC_STATIC_LANGUAGE_LABEL = 1023, // 显示语言标签
 };
 
 /** @brief 图标下载完成的自定义消息 */
@@ -1004,6 +1022,8 @@ struct SettingsDlgData
     bool    changed;                  // 是否有未保存的变更
     bool    apiTested;                // API 是否已通过测试
     wchar_t iconPath[512];            // DeepSeek 图标文件路径
+    Language language;                 // 显示语言偏好
+    Language languageOrig;             // 原始语言偏好
 };
 
 /**
@@ -1102,7 +1122,8 @@ static void RefreshHistoryList(HWND hList, const std::vector<HistoryRecord>* rec
         ListView_InsertItem(hList, &lvi);
         ListView_SetItemText(hList, rowIndex, 0, timeStr);
         ListView_SetItemText(hList, rowIndex, 1,
-            const_cast<wchar_t*>(rec.is_available ? L"是" : L"否"));
+            const_cast<wchar_t*>(
+                rec.is_available ? Strings_Get(StringKey::BOOL_YES) : Strings_Get(StringKey::BOOL_NO)));
 
         wchar_t numStr[32];
         swprintf_s(numStr, L"%.2f", rec.total_balance);
@@ -1113,6 +1134,86 @@ static void RefreshHistoryList(HWND hList, const std::vector<HistoryRecord>* rec
         ListView_SetItemText(hList, rowIndex, 4, numStr);
         ListView_SetItemText(hList, rowIndex, 5, const_cast<wchar_t*>(rec.currency));
     }
+}
+
+/** @brief 防止语言刷新时触发的 CBN_SELCHANGE 导致递归调用 */
+static bool g_bRefreshingLanguage = false;
+
+/**
+ * @brief 根据当前语言刷新对话框上所有控件的文本
+ * @param hDlg    对话框句柄
+ * @param pData   对话框数据（用于刷新历史记录列表）
+ */
+static void RefreshDialogLanguage(HWND hDlg, const SettingsDlgData* pData)
+{
+    g_bRefreshingLanguage = true;
+
+    // 窗口标题
+    SetWindowTextW(hDlg, Strings_Get(StringKey::DLG_TITLE));
+
+    // 标签
+    SetDlgItemTextW(hDlg, IDC_STATIC_API_LABEL,       Strings_Get(StringKey::DLG_API_LABEL));
+    SetDlgItemTextW(hDlg, IDC_STATIC_API_HINT,         Strings_Get(StringKey::DLG_API_HINT));
+    SetDlgItemTextW(hDlg, IDC_STATIC_INTERVAL_LABEL,   Strings_Get(StringKey::DLG_LABEL_INTERVAL));
+    SetDlgItemTextW(hDlg, IDC_STATIC_TIMEOUT_LABEL,    Strings_Get(StringKey::DLG_LABEL_TIMEOUT));
+    SetDlgItemTextW(hDlg, IDC_STATIC_HISTORY_COUNT_LABEL, Strings_Get(StringKey::DLG_LABEL_HISTORY_COUNT));
+    SetDlgItemTextW(hDlg, IDC_STATIC_HISTORY_LABEL,    Strings_Get(StringKey::DLG_LABEL_HISTORY));
+    SetDlgItemTextW(hDlg, IDC_STATIC_LANGUAGE_LABEL,   Strings_Get(StringKey::DLG_LABEL_LANGUAGE));
+
+    // 按钮
+    SetDlgItemTextW(hDlg, IDC_BTN_TEST_API,    Strings_Get(StringKey::DLG_BTN_TEST_API));
+    SetDlgItemTextW(hDlg, IDC_BTN_OK,          Strings_Get(StringKey::DLG_BTN_OK));
+    SetDlgItemTextW(hDlg, IDC_BTN_CANCEL,      Strings_Get(StringKey::DLG_BTN_CANCEL));
+    SetDlgItemTextW(hDlg, IDC_BTN_CLEAR_HISTORY, Strings_Get(StringKey::DLG_BTN_CLEAR_HISTORY));
+    SetDlgItemTextW(hDlg, IDC_CHECK_AUTO_REFRESH, Strings_Get(StringKey::DLG_CHECK_AUTO_REFRESH));
+
+    // 状态文本（仅当处于未测试状态时刷新）
+    if (!pData->apiTested && pData->apiKey[0] != L'\0')
+        SetDlgItemTextW(hDlg, IDC_STATIC_STATUS, Strings_Get(StringKey::DLG_STATUS_UNTESTED));
+
+    // ListView 列头
+    HWND hList = GetDlgItem(hDlg, IDC_LIST_HISTORY);
+    if (hList)
+    {
+        LVCOLUMNW lvc = {};
+        lvc.mask = LVCF_TEXT;
+        lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_TIME));
+        ListView_SetColumn(hList, 0, &lvc);
+        lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_AVAILABLE));
+        ListView_SetColumn(hList, 1, &lvc);
+        lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_TOTAL));
+        ListView_SetColumn(hList, 2, &lvc);
+        lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_GRANTED));
+        ListView_SetColumn(hList, 3, &lvc);
+        lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_TOPPED_UP));
+        ListView_SetColumn(hList, 4, &lvc);
+        lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_CURRENCY));
+        ListView_SetColumn(hList, 5, &lvc);
+
+        // 刷新列表数据（"是"/"否" 文本）
+        RefreshHistoryList(hList, pData->historyRecords);
+    }
+
+    // 语言下拉框 "自动" 项
+    HWND hCombo = GetDlgItem(hDlg, IDC_COMBO_LANGUAGE);
+    if (hCombo)
+    {
+        int curSel = (int)SendMessageW(hCombo, CB_GETCURSEL, 0, 0);
+        SendMessageW(hCombo, CB_DELETESTRING, 0, 0);
+        SendMessageW(hCombo, CB_INSERTSTRING, 0,
+            (LPARAM)Strings_Get(StringKey::COMBO_LANGUAGE_AUTO));
+        if (curSel >= 0)
+            SendMessageW(hCombo, CB_SETCURSEL, (WPARAM)curSel, 0);
+    }
+
+    // 刷新 API 提示和按钮状态（联动）
+    wchar_t bufKey[DSDB_BUF_APIKEY];
+    GetDlgItemTextW(hDlg, IDC_EDIT_API_KEY, bufKey, DSDB_BUF_APIKEY);
+    bool hasContent = (bufKey[0] != L'\0');
+    bool valid = IsValidApiKey(bufKey);
+    UpdateApiDependentControls(hDlg, hasContent, valid, pData->apiTested);
+
+    g_bRefreshingLanguage = false;
 }
 
 /**
@@ -1159,46 +1260,71 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             SendMessageW(hWnd, WM_SETICON, ICON_BIG, (LPARAM)hIcon);
         }
 
-        // --- "DeepSeek API:" 标签 ---
-        hChild = CreateWindowW(L"STATIC", L"DeepSeek API:",
+        // --- 显示语言选择（右上角） ---
+        hChild = CreateWindowW(L"STATIC", Strings_Get(StringKey::DLG_LABEL_LANGUAGE),
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            Scale(20), Scale(72), Scale(110), Scale(20),
-            hWnd, nullptr, hInst, nullptr);
+            Scale(440), Scale(10), Scale(65), Scale(20),
+            hWnd, (HMENU)IDC_STATIC_LANGUAGE_LABEL, hInst, nullptr);
+        SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        {
+            HWND hCombo = CreateWindowW(WC_COMBOBOXW, nullptr,
+                WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_TABSTOP,
+                Scale(510), Scale(8), Scale(120), Scale(200),
+                hWnd, (HMENU)IDC_COMBO_LANGUAGE, hInst, nullptr);
+            SendMessageW(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+            SendMessageW(hCombo, CB_ADDSTRING, 0,
+                (LPARAM)Strings_Get(StringKey::COMBO_LANGUAGE_AUTO));
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"简体中文");
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"繁體中文");
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"日本語");
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"English");
+
+            int selIdx = static_cast<int>(pData->language);
+            SendMessageW(hCombo, CB_SETCURSEL, (WPARAM)selIdx, 0);
+        }
+
+        // --- "DeepSeek API:" 标签 ---
+        hChild = CreateWindowW(L"STATIC", Strings_Get(StringKey::DLG_API_LABEL),
+            WS_CHILD | WS_VISIBLE | SS_RIGHT,
+            Scale(20), Scale(72), Scale(125), Scale(20),
+            hWnd, (HMENU)IDC_STATIC_API_LABEL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- API 密钥输入框 ---
         hChild = CreateWindowW(L"EDIT", pData->apiKey,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(135), Scale(69), Scale(375), Scale(22),
+            Scale(150), Scale(69), Scale(360), Scale(22),
             hWnd, (HMENU)IDC_EDIT_API_KEY, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- API 格式校验提示 ---
-        hChild = CreateWindowW(L"STATIC", L"密钥格式错误：必须以 sk- 开头，后跟32位小写字母和数字",
+        hChild = CreateWindowW(L"STATIC", Strings_Get(StringKey::DLG_API_HINT),
             WS_CHILD | SS_LEFT,
-            Scale(135), Scale(94), Scale(375), Scale(16),
+            Scale(150), Scale(94), Scale(370), Scale(16),
             hWnd, (HMENU)IDC_STATIC_API_HINT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "测试API(&T)" 按钮 ---
-        hChild = CreateWindowW(L"BUTTON", L"测试API(&T)",
+        hChild = CreateWindowW(L"BUTTON", Strings_Get(StringKey::DLG_BTN_TEST_API),
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-            Scale(135), Scale(124), Scale(90), Scale(24),
+            Scale(150), Scale(124), Scale(100), Scale(24),
             hWnd, (HMENU)IDC_BTN_TEST_API, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 测试结果状态文本 ---
-        hChild = CreateWindowW(L"STATIC", L"< 请先测试再保存",
+        hChild = CreateWindowW(L"STATIC", Strings_Get(StringKey::DLG_STATUS_UNTESTED),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
-            Scale(235), Scale(127), Scale(280), Scale(20),
+            Scale(260), Scale(127), Scale(290), Scale(20),
             hWnd, (HMENU)IDC_STATIC_STATUS, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "更新间隔（秒）:" 标签 ---
-        hChild = CreateWindowW(L"STATIC", L"更新间隔（秒）:",
+        hChild = CreateWindowW(L"STATIC", Strings_Get(StringKey::DLG_LABEL_INTERVAL),
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            Scale(20), Scale(174), Scale(110), Scale(20),
-            hWnd, nullptr, hInst, nullptr);
+            Scale(20), Scale(174), Scale(125), Scale(20),
+            hWnd, (HMENU)IDC_STATIC_INTERVAL_LABEL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 更新间隔输入框 ---
@@ -1206,13 +1332,13 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         swprintf_s(bufInterval, L"%d", pData->updateInterval);
         hChild = CreateWindowW(L"EDIT", bufInterval,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(135), Scale(171), Scale(100), Scale(22),
+            Scale(150), Scale(171), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_INTERVAL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 更新间隔 Spin ---
         hChild = CreateWindowW(UPDOWN_CLASSW, nullptr,
-            WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_SETBUDDYINT,
+            WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS,
             0, 0, 0, 0,
             hWnd, (HMENU)IDC_SPIN_INTERVAL, hInst, nullptr);
         SendMessageW(hChild, UDM_SETRANGE32, DSDB_INTERVAL_MIN, DSDB_INTERVAL_MAX);
@@ -1220,10 +1346,10 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "请求超时（秒）:" 标签 ---
-        hChild = CreateWindowW(L"STATIC", L"请求超时（秒）:",
+        hChild = CreateWindowW(L"STATIC", Strings_Get(StringKey::DLG_LABEL_TIMEOUT),
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            Scale(290), Scale(174), Scale(110), Scale(20),
-            hWnd, nullptr, hInst, nullptr);
+            Scale(310), Scale(174), Scale(125), Scale(20),
+            hWnd, (HMENU)IDC_STATIC_TIMEOUT_LABEL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 请求超时输入框 ---
@@ -1231,14 +1357,14 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         swprintf_s(bufTimeout, L"%d", pData->requestTimeout);
         hChild = CreateWindowW(L"EDIT", bufTimeout,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(405), Scale(171), Scale(100), Scale(22),
+            Scale(430), Scale(171), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_TIMEOUT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 超时 Spin ---
         {
             HWND hSpin = CreateWindowW(UPDOWN_CLASSW, nullptr,
-                WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_SETBUDDYINT,
+                WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS,
                 0, 0, 0, 0,
                 hWnd, (HMENU)IDC_SPIN_TIMEOUT, hInst, nullptr);
             SendMessageW(hSpin, UDM_SETRANGE32, DSDB_TIMEOUT_MIN, DSDB_TIMEOUT_MAX);
@@ -1247,10 +1373,10 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         }
 
         // --- "历史记录数量:" 标签 ---
-        hChild = CreateWindowW(L"STATIC", L"历史记录数量:",
+        hChild = CreateWindowW(L"STATIC", Strings_Get(StringKey::DLG_LABEL_HISTORY_COUNT),
             WS_CHILD | WS_VISIBLE | SS_RIGHT,
-            Scale(20), Scale(224), Scale(110), Scale(20),
-            hWnd, nullptr, hInst, nullptr);
+            Scale(20), Scale(224), Scale(125), Scale(20),
+            hWnd, (HMENU)IDC_STATIC_HISTORY_COUNT_LABEL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 历史记录数量输入框 ---
@@ -1258,14 +1384,14 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         swprintf_s(bufHistoryCount, L"%d", pData->maxHistoryCount);
         hChild = CreateWindowW(L"EDIT", bufHistoryCount,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(135), Scale(221), Scale(100), Scale(22),
+            Scale(150), Scale(221), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_HISTORY_COUNT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 历史记录数量 Spin ---
         {
             HWND hSpin = CreateWindowW(UPDOWN_CLASSW, nullptr,
-                WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_SETBUDDYINT,
+                WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS,
                 0, 0, 0, 0,
                 hWnd, (HMENU)IDC_SPIN_HISTORY_COUNT, hInst, nullptr);
             SendMessageW(hSpin, UDM_SETRANGE32, DSDB_HISTORY_COUNT_MIN, DSDB_HISTORY_COUNT_MAX);
@@ -1274,19 +1400,19 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         }
 
         // --- "自动刷新" 复选框 ---
-        hChild = CreateWindowW(L"BUTTON", L"自动刷新",
+        hChild = CreateWindowW(L"BUTTON", Strings_Get(StringKey::DLG_CHECK_AUTO_REFRESH),
             WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
-            Scale(260), Scale(223), Scale(90), Scale(22),
+            Scale(280), Scale(223), Scale(95), Scale(22),
             hWnd, (HMENU)IDC_CHECK_AUTO_REFRESH, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
         SendMessageW(hChild, BM_SETCHECK, BST_CHECKED, 0);
         pData->autoRefresh = true;
 
         // --- "历史记录:" 标签 ---
-        hChild = CreateWindowW(L"STATIC", L"历史变化记录:",
+        hChild = CreateWindowW(L"STATIC", Strings_Get(StringKey::DLG_LABEL_HISTORY),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
-            Scale(20), Scale(256), Scale(80), Scale(20),
-            hWnd, nullptr, hInst, nullptr);
+            Scale(20), Scale(256), Scale(100), Scale(20),
+            hWnd, (HMENU)IDC_STATIC_HISTORY_LABEL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 历史记录 ListView ---
@@ -1305,17 +1431,17 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
             lvc.fmt = LVCFMT_LEFT;
 
-            lvc.cx = Scale(140); lvc.pszText = const_cast<wchar_t*>(L"时间");
+            lvc.cx = Scale(120); lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_TIME));
             ListView_InsertColumn(hList, 0, &lvc);
-            lvc.cx = Scale(50);  lvc.pszText = const_cast<wchar_t*>(L"可用");
+            lvc.cx = Scale(60);  lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_AVAILABLE));
             ListView_InsertColumn(hList, 1, &lvc);
-            lvc.cx = Scale(85);  lvc.pszText = const_cast<wchar_t*>(L"总余额");
+            lvc.cx = Scale(100);  lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_TOTAL));
             ListView_InsertColumn(hList, 2, &lvc);
-            lvc.cx = Scale(85);  lvc.pszText = const_cast<wchar_t*>(L"赠送余额");
+            lvc.cx = Scale(100);  lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_GRANTED));
             ListView_InsertColumn(hList, 3, &lvc);
-            lvc.cx = Scale(85);  lvc.pszText = const_cast<wchar_t*>(L"充值余额");
+            lvc.cx = Scale(100);  lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_TOPPED_UP));
             ListView_InsertColumn(hList, 4, &lvc);
-            lvc.cx = Scale(55);  lvc.pszText = const_cast<wchar_t*>(L"币种");
+            lvc.cx = Scale(65);  lvc.pszText = const_cast<wchar_t*>(Strings_Get(StringKey::DLG_COL_CURRENCY));
             ListView_InsertColumn(hList, 5, &lvc);
 
             RefreshHistoryList(hList, pData->historyRecords);
@@ -1325,23 +1451,23 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         SetTimer(hWnd, 1, 1000, nullptr);
 
         // --- "确定(&O)" 按钮 ---
-        hChild = CreateWindowW(L"BUTTON", L"确定(&O)",
+        hChild = CreateWindowW(L"BUTTON", Strings_Get(StringKey::DLG_BTN_OK),
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED | WS_TABSTOP,
-            Scale(390), Scale(460), Scale(85), Scale(28),
+            Scale(390), Scale(460), Scale(95), Scale(28),
             hWnd, (HMENU)IDC_BTN_OK, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "取消(&C)" 按钮 ---
-        hChild = CreateWindowW(L"BUTTON", L"取消(&C)",
+        hChild = CreateWindowW(L"BUTTON", Strings_Get(StringKey::DLG_BTN_CANCEL),
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-            Scale(485), Scale(460), Scale(85), Scale(28),
+            Scale(485), Scale(460), Scale(95), Scale(28),
             hWnd, (HMENU)IDC_BTN_CANCEL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "清除历史(&R)" 按钮 ---
-        hChild = CreateWindowW(L"BUTTON", L"清除历史(&R)",
+        hChild = CreateWindowW(L"BUTTON", Strings_Get(StringKey::DLG_BTN_CLEAR_HISTORY),
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-            Scale(20), Scale(460), Scale(100), Scale(28),
+            Scale(20), Scale(460), Scale(115), Scale(28),
             hWnd, (HMENU)IDC_BTN_CLEAR_HISTORY, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1460,6 +1586,21 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             }
             break;
 
+        case IDC_COMBO_LANGUAGE:
+            if (code == CBN_SELCHANGE && pData && !g_bRefreshingLanguage)
+            {
+                pData->changed = true;
+                HWND hCombo = GetDlgItem(hWnd, IDC_COMBO_LANGUAGE);
+                int sel = (int)SendMessageW(hCombo, CB_GETCURSEL, 0, 0);
+                if (sel >= 0)
+                    pData->language = static_cast<Language>(sel);
+
+                // 立即应用语言并刷新对话框
+                Strings_SetLanguage(pData->language);
+                RefreshDialogLanguage(hWnd, pData);
+            }
+            break;
+
         case IDC_CHECK_AUTO_REFRESH:
             if (code == BN_CLICKED && pData)
             {
@@ -1477,7 +1618,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 
                 // 禁用按钮，显示"正在测试"状态
                 EnableWindow(GetDlgItem(hWnd, IDC_BTN_TEST_API), FALSE);
-                SetDlgItemTextW(hWnd, IDC_STATIC_STATUS, L"正在测试 API...");
+                SetDlgItemTextW(hWnd, IDC_STATIC_STATUS, Strings_Get(StringKey::STATUS_TESTING));
 
                 // 调用网络模块测试 API（阻塞调用，使用当前设置的超时时间）
                 wchar_t bufTimeout[DSDB_BUF_NUMBER];
@@ -1492,22 +1633,23 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                     // 测试通过：弹出详情提示框
                     wchar_t msg[DSDB_BUF_MESSAGE];
                     swprintf_s(msg,
-                        L"API 测试通过！\n\n"
-                        L"账户可用：%s\n"
-                        L"总余额：%s %s\n"
-                        L"赠送余额：%s %s\n"
-                        L"充值余额：%s %s",
-                        testResult.is_available ? L"是" : L"否",
+                        Strings_Get(StringKey::MSG_TEST_SUCCESS_BODY),
+                        testResult.is_available
+                            ? Strings_Get(StringKey::BOOL_YES)
+                            : Strings_Get(StringKey::BOOL_NO),
                         testResult.total_balance.c_str(),
                         testResult.currency.c_str(),
                         testResult.granted_balance.c_str(),
                         testResult.currency.c_str(),
                         testResult.topped_up_balance.c_str(),
                         testResult.currency.c_str());
-                    MessageBoxW(hWnd, msg, L"API 测试成功", MB_OK | MB_ICONINFORMATION);
+                    MessageBoxW(hWnd, msg,
+                        Strings_Get(StringKey::MSG_TEST_SUCCESS_TITLE),
+                        MB_OK | MB_ICONINFORMATION);
 
                     pData->apiTested = true;
-                    SetDlgItemTextW(hWnd, IDC_STATIC_STATUS, L"API 测试通过");
+                    SetDlgItemTextW(hWnd, IDC_STATIC_STATUS,
+                        Strings_Get(StringKey::STATUS_TEST_PASSED));
                 }
                 else
                 {
@@ -1517,19 +1659,22 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                         errMsg = testResult.error_message;
                     else if (testResult.http_status_code != 0)
                     {
-                        wchar_t statusMsg[DSDB_BUF_STATUS];
-                        swprintf_s(statusMsg, L"HTTP 状态码 %d", testResult.http_status_code);
-                        errMsg = statusMsg;
+                        errMsg = L"HTTP " + std::to_wstring(testResult.http_status_code);
                     }
                     else
-                        errMsg = L"未知错误";
+                        errMsg = L"Unknown error";
 
                     wchar_t msg[DSDB_BUF_MESSAGE];
-                    swprintf_s(msg, L"API 测试失败！\n\n错误信息：%s", errMsg.c_str());
-                    MessageBoxW(hWnd, msg, L"API 测试失败", MB_OK | MB_ICONWARNING);
+                    swprintf_s(msg,
+                        Strings_Get(StringKey::MSG_TEST_FAILED_BODY),
+                        errMsg.c_str());
+                    MessageBoxW(hWnd, msg,
+                        Strings_Get(StringKey::MSG_TEST_FAILED_TITLE),
+                        MB_OK | MB_ICONWARNING);
 
                     pData->apiTested = false;
-                    SetDlgItemTextW(hWnd, IDC_STATIC_STATUS, L"API 测试失败");
+                    SetDlgItemTextW(hWnd, IDC_STATIC_STATUS,
+                        Strings_Get(StringKey::STATUS_TEST_FAILED));
                 }
 
                 // 恢复按钮可用状态，更新控件联动
@@ -1543,8 +1688,8 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             if (pData)
             {
                 int result = MessageBoxW(hWnd,
-                    L"确定要清除所有历史记录吗？\n\n此操作不可撤销。",
-                    L"确认清除", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+                    Strings_Get(StringKey::MSG_CONFIRM_CLEAR_BODY),
+                    Strings_Get(StringKey::MSG_CONFIRM_CLEAR_TITLE), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
                 if (result == IDYES)
                 {
                     // 立即清空内存中的记录
@@ -1569,8 +1714,9 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 // 保存前二次校验（防御性编程，空密钥允许保存）
                 if (pData->apiKey[0] != L'\0' && !IsValidApiKey(pData->apiKey))
                 {
-                    MessageBoxW(hWnd, L"API 密钥格式无效，请检查后重试。",
-                        L"格式错误", MB_OK | MB_ICONWARNING);
+                    MessageBoxW(hWnd,
+                        Strings_Get(StringKey::MSG_INVALID_KEY_BODY),
+                        Strings_Get(StringKey::MSG_INVALID_KEY_TITLE), MB_OK | MB_ICONWARNING);
                     return 0;
                 }
 
@@ -1592,8 +1738,8 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 if (pData->updateInterval <= pData->requestTimeout)
                 {
                     MessageBoxW(hWnd,
-                        L"更新间隔必须大于请求超时时间，\n否则上一个请求未完成就会发起下一个请求。",
-                        L"参数错误", MB_OK | MB_ICONWARNING);
+                        Strings_Get(StringKey::MSG_INTERVAL_ERROR_BODY),
+                        Strings_Get(StringKey::MSG_INTERVAL_ERROR_TITLE), MB_OK | MB_ICONWARNING);
                     return 0;
                 }
 
@@ -1618,6 +1764,8 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 pData->maxHistoryCount = pData->maxHistoryCountOrig;
                 pData->historyCleared = false;
                 pData->changed = false;
+                pData->language = pData->languageOrig;
+                Strings_SetLanguage(pData->languageOrig);  // 恢复原语言
 
                 // 若之前点了清除历史，刷新 ListView 恢复显示
                 HWND hList = GetDlgItem(hWnd, IDC_LIST_HISTORY);
@@ -1658,7 +1806,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     case WM_GETMINMAXINFO:
     {
         MINMAXINFO* pInfo = (MINMAXINFO*)lParam;
-        pInfo->ptMinTrackSize.x = Scale(610);
+        pInfo->ptMinTrackSize.x = Scale(640);
         pInfo->ptMinTrackSize.y = Scale(460);
         return 0;
     }
@@ -1676,17 +1824,29 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             // OK 按钮：右侧与取消按钮间距 10px
             HWND hBtn = GetDlgItem(hWnd, IDC_BTN_OK);
             if (hBtn)
-                SetWindowPos(hBtn, nullptr, cx - Scale(200), btnY, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+                SetWindowPos(hBtn, nullptr, cx - Scale(220), btnY, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
 
             // 取消按钮：右侧与表格右侧齐平
             hBtn = GetDlgItem(hWnd, IDC_BTN_CANCEL);
             if (hBtn)
-                SetWindowPos(hBtn, nullptr, cx - Scale(105), btnY, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+                SetWindowPos(hBtn, nullptr, cx - Scale(115), btnY, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
 
             // 清除历史按钮：左对齐
             hBtn = GetDlgItem(hWnd, IDC_BTN_CLEAR_HISTORY);
             if (hBtn)
                 SetWindowPos(hBtn, nullptr, Scale(20), btnY, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+
+            // 语言下拉框：右侧与取消按钮右侧对齐
+            HWND hCombo = GetDlgItem(hWnd, IDC_COMBO_LANGUAGE);
+            if (hCombo)
+                SetWindowPos(hCombo, nullptr, cx - Scale(140), Scale(8), 0, 0,
+                    SWP_NOSIZE | SWP_NOZORDER);
+
+            // 语言标签：在下拉框左侧
+            HWND hLangLabel = GetDlgItem(hWnd, IDC_STATIC_LANGUAGE_LABEL);
+            if (hLangLabel)
+                SetWindowPos(hLangLabel, nullptr, cx - Scale(213), Scale(10), 0, 0,
+                    SWP_NOSIZE | SWP_NOZORDER);
 
             // ListView：拉伸填充
             HWND hList = GetDlgItem(hWnd, IDC_LIST_HISTORY);
@@ -1705,6 +1865,38 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     case WM_NOTIFY:
     {
         NMHDR* pNm = (NMHDR*)lParam;
+
+        // UpDown 控件增量（手动处理，避免千位分隔符）
+        if (pNm->code == UDN_DELTAPOS)
+        {
+            NMUPDOWN* pUd = (NMUPDOWN*)lParam;
+            int editId = 0;
+            int minVal = 0, maxVal = 0;
+
+            switch (pNm->idFrom)
+            {
+            case IDC_SPIN_INTERVAL:
+                editId = IDC_EDIT_INTERVAL; minVal = DSDB_INTERVAL_MIN; maxVal = DSDB_INTERVAL_MAX; break;
+            case IDC_SPIN_TIMEOUT:
+                editId = IDC_EDIT_TIMEOUT;  minVal = DSDB_TIMEOUT_MIN;  maxVal = DSDB_TIMEOUT_MAX;  break;
+            case IDC_SPIN_HISTORY_COUNT:
+                editId = IDC_EDIT_HISTORY_COUNT; minVal = DSDB_HISTORY_COUNT_MIN; maxVal = DSDB_HISTORY_COUNT_MAX; break;
+            }
+
+            if (editId != 0)
+            {
+                wchar_t buf[DSDB_BUF_NUMBER];
+                GetDlgItemTextW(hWnd, editId, buf, DSDB_BUF_NUMBER);
+                int val = _wtoi(buf) + pUd->iDelta;
+                if (val < minVal) val = minVal;
+                if (val > maxVal) val = maxVal;
+                swprintf_s(buf, L"%d", val);
+                SetDlgItemTextW(hWnd, editId, buf);
+                pData->changed = true;
+            }
+            return 0;
+        }
+
         if (pNm->idFrom == IDC_LIST_HISTORY && pNm->code == NM_CLICK && pData && pData->autoRefresh)
         {
             // 用户点击表格 → 取消自动刷新
@@ -1724,6 +1916,8 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             pData->maxHistoryCount = pData->maxHistoryCountOrig;
             pData->historyCleared = false;
             pData->changed = false;
+            pData->language = pData->languageOrig;
+            Strings_SetLanguage(pData->languageOrig);  // 恢复原语言
         }
         DestroyWindow(hWnd);
         break;
@@ -1794,6 +1988,8 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
     dlgData.historyCleared = false;
     dlgData.changed = false;
     dlgData.apiTested = false;
+    dlgData.language = m_language;
+    dlgData.languageOrig = m_language;
 
     // 准备图标路径并下载（如不存在）
     IconDownloadParam* pIconParam = nullptr;
@@ -1812,7 +2008,7 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
     }
 
     // 计算居中位置（窗口扩大以容纳历史记录 ListView）
-    int dlgWidth = Scale(610);
+    int dlgWidth = Scale(640);
     int dlgHeight = Scale(540);
     int x = CW_USEDEFAULT;
     int y = CW_USEDEFAULT;
@@ -1827,7 +2023,7 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
 
     // 创建对话框窗口（可调大小、可最大化）
     HWND hDlg = CreateWindowExW(
-        WS_EX_CLIENTEDGE, SETTINGS_DIALOG_CLASS, L"DeepSeek 设置",
+        WS_EX_CLIENTEDGE, SETTINGS_DIALOG_CLASS, Strings_Get(StringKey::DLG_TITLE),
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX,
         x, y, dlgWidth, dlgHeight,
         hParentWnd, nullptr, hInst, &dlgData);
@@ -1881,6 +2077,8 @@ ITMPlugin::OptionReturn CDeepSeekDeskBand::ShowOptionsDialog(void* hParent)
         m_updateInterval = dlgData.updateInterval;
         m_requestTimeout = dlgData.requestTimeout;
         m_maxHistoryCount = dlgData.maxHistoryCount;
+        m_language = dlgData.language;
+        Strings_SetLanguage(m_language);  // 立即应用语言设置
         m_hasBalance = false;       // 设置变更后立即重新获取余额
         m_lastFetchTime = 0;
         SaveConfig();
@@ -1948,7 +2146,7 @@ int CDeepSeekDeskBand::GetCommandCount()
 const wchar_t* CDeepSeekDeskBand::GetCommandName(int command_index)
 {
     if (command_index == 0)
-        return L"DeepSeek余额助手";
+        return Strings_Get(StringKey::COMMAND_NAME);
     return nullptr;
 }
 

@@ -5,6 +5,7 @@
  *          当前为空实现，所有插件逻辑在 TMPluginGetInstance() 中完成。
  ****************************************************************************/
 #include "framework.h"
+#include "Strings.h"
 
 /**
  * @brief DLL 入口点函数
@@ -17,7 +18,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 {
     switch (ul_reason_for_call)
     {
-    case DLL_PROCESS_ATTACH:   // DLL 被加载时
+    case DLL_PROCESS_ATTACH:   // DLL 被加载时，检测系统语言
+        Strings_Init();
+        break;
     case DLL_THREAD_ATTACH:    // 新线程创建时
     case DLL_THREAD_DETACH:    // 线程退出时
     case DLL_PROCESS_DETACH:   // DLL 被卸载时

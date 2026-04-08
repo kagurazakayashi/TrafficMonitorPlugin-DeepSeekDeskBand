@@ -149,6 +149,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Strings.h" />
     <ClInclude Include="Config.h" />
     <ClInclude Include="ConfigEncrypt.h" />
     <ClInclude Include="DeepSeekDeskBand.h" />
@@ -162,6 +163,11 @@
     <ClCompile Include="DeepSeekDeskBand.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="HttpClient.cpp" />
+    <ClCompile Include="Strings.cpp" />
+    <ClCompile Include="StringsEnUS.cpp" />
+    <ClCompile Include="StringsJaJP.cpp" />
+    <ClCompile Include="StringsZhCN.cpp" />
+    <ClCompile Include="StringsZhTW.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="version.rc" />

@@ -10,6 +10,7 @@
 #include "Config.h"
 #include "HttpClient.h"
 #include "PluginInterface.h"
+#include "Strings.h"
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -167,6 +168,9 @@ private:
 
     /** @brief 历史记录最大保留数量（0 表示不记录） */
     int m_maxHistoryCount = DSDB_DEFAULT_HISTORY_COUNT;
+
+    /** @brief 显示语言偏好（Auto=自动检测系统语言） */
+    Language m_language = Language::Auto;
 
     /** @brief 获取配置文件完整路径 */
     std::wstring GetConfigFilePath();

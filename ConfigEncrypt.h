@@ -23,6 +23,7 @@ struct ConfigBlob
     int32_t     updateInterval;          ///< 更新间隔（秒）
     int32_t     requestTimeout;          ///< 请求超时（秒）
     int32_t     maxHistoryCount;         ///< 历史记录最大保留数量
+    int32_t     language;               ///< 显示语言偏好（0=自动, 1=简中, 2=繁中, 3=日语, 4=英语）
     std::wstring apiKey;                 ///< DeepSeek API 密钥
 };
 
