@@ -1280,6 +1280,14 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"繁體中文");
             SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"日本語");
             SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"English");
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Deutsch");
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"עברית");
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Magyar");
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Italiano");
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Polski");
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Português (Brasil)");
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Русский");
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Türkçe");
 
             int selIdx = static_cast<int>(pData->language);
             SendMessageW(hCombo, CB_SETCURSEL, (WPARAM)selIdx, 0);
@@ -1295,28 +1303,28 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         // --- API 密钥输入框 ---
         hChild = CreateWindowW(L"EDIT", pData->apiKey,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(150), Scale(69), Scale(360), Scale(22),
+            Scale(158), Scale(69), Scale(360), Scale(22),
             hWnd, (HMENU)IDC_EDIT_API_KEY, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- API 格式校验提示 ---
         hChild = CreateWindowW(L"STATIC", Strings_Get(StringKey::DLG_API_HINT),
             WS_CHILD | SS_LEFT,
-            Scale(150), Scale(94), Scale(370), Scale(16),
+            Scale(158), Scale(94), Scale(370), Scale(16),
             hWnd, (HMENU)IDC_STATIC_API_HINT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- "测试API(&T)" 按钮 ---
         hChild = CreateWindowW(L"BUTTON", Strings_Get(StringKey::DLG_BTN_TEST_API),
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-            Scale(150), Scale(124), Scale(100), Scale(24),
+            Scale(158), Scale(124), Scale(100), Scale(24),
             hWnd, (HMENU)IDC_BTN_TEST_API, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // --- 测试结果状态文本 ---
         hChild = CreateWindowW(L"STATIC", Strings_Get(StringKey::DLG_STATUS_UNTESTED),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
-            Scale(260), Scale(127), Scale(290), Scale(20),
+            Scale(268), Scale(127), Scale(290), Scale(20),
             hWnd, (HMENU)IDC_STATIC_STATUS, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1332,7 +1340,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         swprintf_s(bufInterval, L"%d", pData->updateInterval);
         hChild = CreateWindowW(L"EDIT", bufInterval,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(150), Scale(171), Scale(100), Scale(22),
+            Scale(158), Scale(171), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_INTERVAL, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1357,7 +1365,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         swprintf_s(bufTimeout, L"%d", pData->requestTimeout);
         hChild = CreateWindowW(L"EDIT", bufTimeout,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(430), Scale(171), Scale(100), Scale(22),
+            Scale(445), Scale(171), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_TIMEOUT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1384,7 +1392,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         swprintf_s(bufHistoryCount, L"%d", pData->maxHistoryCount);
         hChild = CreateWindowW(L"EDIT", bufHistoryCount,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
-            Scale(150), Scale(221), Scale(100), Scale(22),
+            Scale(158), Scale(221), Scale(100), Scale(22),
             hWnd, (HMENU)IDC_EDIT_HISTORY_COUNT, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1402,7 +1410,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         // --- "自动刷新" 复选框 ---
         hChild = CreateWindowW(L"BUTTON", Strings_Get(StringKey::DLG_CHECK_AUTO_REFRESH),
             WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
-            Scale(280), Scale(223), Scale(95), Scale(22),
+            Scale(288), Scale(223), Scale(95), Scale(22),
             hWnd, (HMENU)IDC_CHECK_AUTO_REFRESH, hInst, nullptr);
         SendMessageW(hChild, WM_SETFONT, (WPARAM)hFont, TRUE);
         SendMessageW(hChild, BM_SETCHECK, BST_CHECKED, 0);

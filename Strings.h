@@ -15,7 +15,15 @@ enum class Language
     ChineseSimplified,  ///< 简体中文（大陆风格）
     ChineseTraditional, ///< 繁体中文（台湾风格）
     Japanese,           ///< 日语
-    English             ///< 英语（默认回退语言）
+    English,            ///< 英语
+    German,             ///< 德语
+    Hebrew,             ///< 希伯来语
+    Hungarian,          ///< 匈牙利语
+    Italian,            ///< 意大利语
+    Polish,             ///< 波兰语
+    PortugueseBrazilian,///< 葡萄牙语（巴西）
+    Russian,            ///< 俄语
+    Turkish,            ///< 土耳其语
 };
 
 /** @brief 本地化字符串键，对应 UI 中的每一处文本 */

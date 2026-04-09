@@ -34,6 +34,38 @@ void Strings_Init()
     {
         g_systemLanguage = Language::Japanese;
     }
+    else if (primary == LANG_GERMAN)
+    {
+        g_systemLanguage = Language::German;
+    }
+    else if (primary == LANG_HEBREW)
+    {
+        g_systemLanguage = Language::Hebrew;
+    }
+    else if (primary == LANG_HUNGARIAN)
+    {
+        g_systemLanguage = Language::Hungarian;
+    }
+    else if (primary == LANG_ITALIAN)
+    {
+        g_systemLanguage = Language::Italian;
+    }
+    else if (primary == LANG_POLISH)
+    {
+        g_systemLanguage = Language::Polish;
+    }
+    else if (primary == LANG_PORTUGUESE)
+    {
+        g_systemLanguage = Language::PortugueseBrazilian;
+    }
+    else if (primary == LANG_RUSSIAN)
+    {
+        g_systemLanguage = Language::Russian;
+    }
+    else if (primary == LANG_TURKISH)
+    {
+        g_systemLanguage = Language::Turkish;
+    }
     else
     {
         g_systemLanguage = Language::English;
@@ -70,6 +102,14 @@ extern const wchar_t* kStringsZhCN[];
 extern const wchar_t* kStringsZhTW[];
 extern const wchar_t* kStringsJaJP[];
 extern const wchar_t* kStringsEnUS[];
+extern const wchar_t* kStringsDeDE[];
+extern const wchar_t* kStringsHeIL[];
+extern const wchar_t* kStringsHuHU[];
+extern const wchar_t* kStringsItIT[];
+extern const wchar_t* kStringsPlPL[];
+extern const wchar_t* kStringsPtBR[];
+extern const wchar_t* kStringsRuRU[];
+extern const wchar_t* kStringsTrTR[];
 
 /**
  * @brief 根据当前语言和字符串键返回对应文本
@@ -84,6 +124,14 @@ const wchar_t* Strings_Get(StringKey key)
     case Language::ChineseSimplified:  return kStringsZhCN[idx];
     case Language::ChineseTraditional: return kStringsZhTW[idx];
     case Language::Japanese:           return kStringsJaJP[idx];
+    case Language::German:             return kStringsDeDE[idx];
+    case Language::Hebrew:             return kStringsHeIL[idx];
+    case Language::Hungarian:          return kStringsHuHU[idx];
+    case Language::Italian:            return kStringsItIT[idx];
+    case Language::Polish:             return kStringsPlPL[idx];
+    case Language::PortugueseBrazilian:return kStringsPtBR[idx];
+    case Language::Russian:            return kStringsRuRU[idx];
+    case Language::Turkish:            return kStringsTrTR[idx];
     case Language::English:
     default:                           return kStringsEnUS[idx];
     }

@@ -164,8 +164,16 @@
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="HttpClient.cpp" />
     <ClCompile Include="Strings.cpp" />
+    <ClCompile Include="StringsDeDE.cpp" />
     <ClCompile Include="StringsEnUS.cpp" />
+    <ClCompile Include="StringsHeIL.cpp" />
+    <ClCompile Include="StringsHuHU.cpp" />
+    <ClCompile Include="StringsItIT.cpp" />
     <ClCompile Include="StringsJaJP.cpp" />
+    <ClCompile Include="StringsPlPL.cpp" />
+    <ClCompile Include="StringsPtBR.cpp" />
+    <ClCompile Include="StringsRuRU.cpp" />
+    <ClCompile Include="StringsTrTR.cpp" />
     <ClCompile Include="StringsZhCN.cpp" />
     <ClCompile Include="StringsZhTW.cpp" />
   </ItemGroup>
