@@ -2,113 +2,18 @@
  * @file    HttpClient.cpp
  * @brief   HTTP 客户端工具实现
  * @details 使用 WinHTTP 发送 HTTPS GET 请求，查询 DeepSeek API 余额。
- *          包含简易 JSON 解析器，不依赖任何第三方 JSON 库。
+ *          使用 JsonParser 模块进行响应体 JSON 解析。
  ****************************************************************************/
 #include "HttpClient.h"
 #include "Config.h"
+#include "JsonParser.h"
+#include "Logger.h"
 #include "framework.h"
 #include <winhttp.h>
 #include <vector>
 #include <cwchar>
 #include <cstring>
 #pragma comment(lib, "winhttp.lib")
-
-// ============================================================
-// 常量定义
-// ============================================================
-
-/** @brief API 服务器主机名 */
-static const wchar_t* HOST_NAME = L"api.deepseek.com";
-
-/** @brief 余额查询路径 */
-static const wchar_t* BALANCE_PATH = L"/user/balance";
-
-/** @brief 请求超时（毫秒），将在函数内部根据参数计算 */
-static const int MIN_TIMEOUT_SEC = 3;
-static const int MAX_TIMEOUT_SEC = 60;
-
-// ============================================================
-// 简易 JSON 解析辅助函数
-// ============================================================
-
-/**
- * @brief 在 JSON 字符串中查找指定键，提取其布尔值（true/false）
- * @param json   以 null 结尾的 UTF-16 JSON 字符串
- * @param key    要查找的键（不含引号）
- * @param out    输出布尔值
- * @return 找到并成功解析返回 true
- */
-static bool JsonExtractBool(const wchar_t* json, const wchar_t* key, bool& out)
-{
-    if (!json || !key)
-        return false;
-
-    // 构造带引号的键字符串，如 L"\"is_available\""
-    std::wstring searchKey = L"\"";
-    searchKey += key;
-    searchKey += L"\"";
-
-    const wchar_t* pos = wcsstr(json, searchKey.c_str());
-    if (!pos)
-        return false;
-
-    // 跳过键部分，找到 ":" 分隔符
-    pos = pos + searchKey.size();
-    while (*pos && (*pos == L':' || *pos == L' ' || *pos == L'\t' || *pos == L'\n' || *pos == L'\r'))
-        pos++;
-
-    if (wcsncmp(pos, L"true", 4) == 0)
-    {
-        out = true;
-        return true;
-    }
-    if (wcsncmp(pos, L"false", 5) == 0)
-    {
-        out = false;
-        return true;
-    }
-    return false;
-}
-
-/**
- * @brief 在 JSON 字符串中查找指定键，提取其字符串值（不含外层引号）
- * @param json   以 null 结尾的 UTF-16 JSON 字符串
- * @param key    要查找的键（不含引号）
- * @param out    输出字符串值
- * @return 找到并成功提取返回 true
- */
-static bool JsonExtractString(const wchar_t* json, const wchar_t* key, std::wstring& out)
-{
-    if (!json || !key)
-        return false;
-
-    std::wstring searchKey = L"\"";
-    searchKey += key;
-    searchKey += L"\"";
-
-    const wchar_t* pos = wcsstr(json, searchKey.c_str());
-    if (!pos)
-        return false;
-
-    // 跳过键部分，找到 ":" 后的第一个 '"'
-    pos = pos + searchKey.size();
-    while (*pos && (*pos == L':' || *pos == L' ' || *pos == L'\t' || *pos == L'\n' || *pos == L'\r'))
-        pos++;
-
-    if (*pos != L'"')
-        return false;
-
-    pos++; // 跳过开引号
-    const wchar_t* end = pos;
-    while (*end && *end != L'"')
-        end++;
-
-    if (*end != L'"')
-        return false;
-
-    out.assign(pos, static_cast<size_t>(end - pos));
-    return true;
-}
 
 // ============================================================
 // WinHTTP 请求与 JSON 解析
@@ -129,8 +34,11 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
     if (!apiKey || apiKey[0] == L'\0')
     {
         result.error_message = L"API 密钥为空";
+        Logger_Warn(L"TestDeepSeekApi: API 密钥为空");
         return result;
     }
+
+    Logger_Debug(L"TestDeepSeekApi: 开始, keyLen=%zu timeout=%ds", wcslen(apiKey), timeoutSeconds);
 
     // 钳制超时范围
     if (timeoutSeconds < DSDB_TIMEOUT_MIN)
@@ -153,7 +61,9 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
 
     if (!hSession)
     {
+        DWORD err = GetLastError();
         result.error_message = L"无法初始化网络会话 (WinHttpOpen 失败)";
+        Logger_Error(L"TestDeepSeekApi: WinHttpOpen 失败, err=%lu", err);
         return result;
     }
 
@@ -169,10 +79,15 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
     HINTERNET hConnect = WinHttpConnect(hSession, DSDB_API_HOST, DSDB_API_PORT, 0);
     if (!hConnect)
     {
+        DWORD err = GetLastError();
         result.error_message = L"无法连接到服务器 (WinHttpConnect 失败)";
+        Logger_Error(L"TestDeepSeekApi: WinHttpConnect 失败, host=%s port=%d err=%lu",
+            DSDB_API_HOST, DSDB_API_PORT, err);
         WinHttpCloseHandle(hSession);
         return result;
     }
+
+    Logger_Debug(L"TestDeepSeekApi: WinHttpConnect 成功, host=%s", DSDB_API_HOST);
 
     // ---- 打开 HTTPS 请求 ----
     HINTERNET hRequest = WinHttpOpenRequest(
@@ -186,7 +101,9 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
 
     if (!hRequest)
     {
+        DWORD err = GetLastError();
         result.error_message = L"无法创建请求 (WinHttpOpenRequest 失败)";
+        Logger_Error(L"TestDeepSeekApi: WinHttpOpenRequest 失败, err=%lu", err);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
         return result;
@@ -199,14 +116,19 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
             static_cast<DWORD>(authHeader.size()),
             WINHTTP_ADDREQ_FLAG_ADD))
     {
+        DWORD err = GetLastError();
         result.error_message = L"无法设置请求头";
+        Logger_Error(L"TestDeepSeekApi: WinHttpAddRequestHeaders 失败, err=%lu", err);
         WinHttpCloseHandle(hRequest);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
         return result;
     }
 
+    Logger_Debug(L"TestDeepSeekApi: Authorization 头已设置");
+
     // ---- 发送请求 ----
+    Logger_Debug(L"TestDeepSeekApi: 正在发送请求...");
     if (!WinHttpSendRequest(
             hRequest,
             WINHTTP_NO_ADDITIONAL_HEADERS, 0,
@@ -221,6 +143,8 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
             result.error_message = L"无法连接到 api.deepseek.com，请检查网络";
         else if (err == ERROR_WINHTTP_NAME_NOT_RESOLVED)
             result.error_message = L"无法解析域名 api.deepseek.com，请检查 DNS";
+        Logger_Error(L"TestDeepSeekApi: WinHttpSendRequest 失败, err=%lu msg=\"%s\"",
+            err, result.error_message.c_str());
         WinHttpCloseHandle(hRequest);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
@@ -230,7 +154,9 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
     // ---- 接收响应 ----
     if (!WinHttpReceiveResponse(hRequest, nullptr))
     {
+        DWORD err = GetLastError();
         result.error_message = L"服务器无响应";
+        Logger_Error(L"TestDeepSeekApi: WinHttpReceiveResponse 失败, err=%lu", err);
         WinHttpCloseHandle(hRequest);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
@@ -249,6 +175,7 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
         WINHTTP_NO_HEADER_INDEX);
 
     result.http_status_code = static_cast<int>(statusCode);
+    Logger_Debug(L"TestDeepSeekApi: HTTP 状态码=%d", result.http_status_code);
 
     // ---- 读取响应体 ----
     std::string utf8Body;
@@ -281,8 +208,11 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
         wchar_t statusMsg[DSDB_BUF_STATUS];
         swprintf_s(statusMsg, L"HTTP 错误 %d", statusCode);
         result.error_message = statusMsg;
+        Logger_Warn(L"TestDeepSeekApi: 响应体为空, HTTP=%d", statusCode);
         return result;
     }
+
+    Logger_Debug(L"TestDeepSeekApi: 响应体=%zu 字节 (UTF-8)", utf8Body.size());
 
     // ---- UTF-8 转 UTF-16 ----
     int wideLen = MultiByteToWideChar(CP_UTF8, 0, utf8Body.c_str(), -1, nullptr, 0);
@@ -303,6 +233,7 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
     if (JsonExtractString(json, L"message", errorMsg) && !errorMsg.empty())
     {
         result.error_message = errorMsg;
+        Logger_Warn(L"TestDeepSeekApi: API 返回错误消息: \"%s\"", errorMsg.c_str());
         return result;
     }
 
@@ -310,8 +241,8 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
     // 提取 is_available
     if (!JsonExtractBool(json, L"is_available", result.is_available))
     {
-        // 可能响应格式异常
         result.error_message = L"服务器返回数据格式异常，无法解析 is_available";
+        Logger_Error(L"TestDeepSeekApi: 无法解析 is_available");
         return result;
     }
 
@@ -322,5 +253,8 @@ ApiTestResult TestDeepSeekApi(const wchar_t* apiKey, int timeoutSeconds)
     JsonExtractString(json, L"topped_up_balance", result.topped_up_balance);
 
     result.success = true;
+    Logger_Info(L"TestDeepSeekApi: 解析成功, available=%d total=%s granted=%s topped=%s currency=%s",
+        result.is_available, result.total_balance.c_str(), result.granted_balance.c_str(),
+        result.topped_up_balance.c_str(), result.currency.c_str());
     return result;
 }

@@ -1,6 +1,6 @@
 # DeepSeekDeskBand
 
-TrafficMonitor 插件： DeepSeek 余额显示助手。
+TrafficMonitor 插件： DeepSeek 余额助手。
 
 在 [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) 的任务栏窗口和主窗口中显示 DeepSeek 余额信息。
 

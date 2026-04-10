@@ -154,15 +154,21 @@
     <ClInclude Include="ConfigEncrypt.h" />
     <ClInclude Include="DeepSeekDeskBand.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="HistoryManager.h" />
     <ClInclude Include="HttpClient.h" />
+    <ClInclude Include="JsonParser.h" />
     <ClInclude Include="Logger.h" />
     <ClInclude Include="PluginInterface.h" />
+    <ClInclude Include="SettingsDialog.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ConfigEncrypt.cpp" />
     <ClCompile Include="DeepSeekDeskBand.cpp" />
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="HistoryManager.cpp" />
     <ClCompile Include="HttpClient.cpp" />
+    <ClCompile Include="JsonParser.cpp" />
+    <ClCompile Include="SettingsDialog.cpp" />
     <ClCompile Include="Strings.cpp" />
     <ClCompile Include="StringsDeDE.cpp" />
     <ClCompile Include="StringsEnUS.cpp" />

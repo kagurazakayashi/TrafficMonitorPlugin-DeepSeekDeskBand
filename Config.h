@@ -139,3 +139,18 @@
 
 /** @brief 历史记录最大数量 */
 #define DSDB_HISTORY_COUNT_MAX      10000
+
+// ============================================================
+// 日志配置
+// ============================================================
+
+/** @brief 日志文件输出路径
+ *  @details 空字符串表示不产生日志文件（默认），仅通过 OutputDebugStringW 输出到调试器。
+ *           设置为非空路径时，日志将同时写入指定文件。
+ *           例如：L"C:\\Temp\\DeepSeekDeskBand.log" 或 L"" */
+#define DSDB_LOG_FILE_PATH          L""
+
+/** @brief 日志级别
+ *  @details 0=全部(Debug+Info+Warn+Error), 1=Info+Warn+Error,
+ *           2=Warn+Error, 3=仅Error, 4=禁用所有日志 */
+#define DSDB_LOG_LEVEL              4
