@@ -87,8 +87,49 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;DEEPSEEKDESKBAND_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;DEEPSEEKDESKBAND_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;DEEPSEEKDESKBAND_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;DEEPSEEKDESKBAND_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -162,26 +203,26 @@
     <ClInclude Include="SettingsDialog.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="ConfigEncrypt.cpp" />
-    <ClCompile Include="DeepSeekDeskBand.cpp" />
-    <ClCompile Include="dllmain.cpp" />
-    <ClCompile Include="HistoryManager.cpp" />
-    <ClCompile Include="HttpClient.cpp" />
-    <ClCompile Include="JsonParser.cpp" />
-    <ClCompile Include="SettingsDialog.cpp" />
-    <ClCompile Include="Strings.cpp" />
-    <ClCompile Include="StringsDeDE.cpp" />
-    <ClCompile Include="StringsEnUS.cpp" />
-    <ClCompile Include="StringsHeIL.cpp" />
-    <ClCompile Include="StringsHuHU.cpp" />
-    <ClCompile Include="StringsItIT.cpp" />
-    <ClCompile Include="StringsJaJP.cpp" />
-    <ClCompile Include="StringsPlPL.cpp" />
-    <ClCompile Include="StringsPtBR.cpp" />
-    <ClCompile Include="StringsRuRU.cpp" />
-    <ClCompile Include="StringsTrTR.cpp" />
-    <ClCompile Include="StringsZhCN.cpp" />
-    <ClCompile Include="StringsZhTW.cpp" />
+    <ClCompile Include="src\ConfigEncrypt.cpp" />
+    <ClCompile Include="src\DeepSeekDeskBand.cpp" />
+    <ClCompile Include="src\dllmain.cpp" />
+    <ClCompile Include="src\HistoryManager.cpp" />
+    <ClCompile Include="src\HttpClient.cpp" />
+    <ClCompile Include="src\JsonParser.cpp" />
+    <ClCompile Include="src\SettingsDialog.cpp" />
+    <ClCompile Include="src\Strings.cpp" />
+    <ClCompile Include="locales\StringsDeDE.cpp" />
+    <ClCompile Include="locales\StringsEnUS.cpp" />
+    <ClCompile Include="locales\StringsHeIL.cpp" />
+    <ClCompile Include="locales\StringsHuHU.cpp" />
+    <ClCompile Include="locales\StringsItIT.cpp" />
+    <ClCompile Include="locales\StringsJaJP.cpp" />
+    <ClCompile Include="locales\StringsPlPL.cpp" />
+    <ClCompile Include="locales\StringsPtBR.cpp" />
+    <ClCompile Include="locales\StringsRuRU.cpp" />
+    <ClCompile Include="locales\StringsTrTR.cpp" />
+    <ClCompile Include="locales\StringsZhCN.cpp" />
+    <ClCompile Include="locales\StringsZhTW.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="version.rc" />

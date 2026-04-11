@@ -1,62 +1,150 @@
-# DeepSeekDeskBand
+# DeepSeek Balance Assistant (DeepSeekDeskBand)
 
-TrafficMonitor 插件： DeepSeek 余额助手。
+![screenshot](screenshot.png)
 
-在 [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) 的任务栏窗口和主窗口中显示 DeepSeek 余额信息。
+A [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) desk band plugin that displays real-time DeepSeek official balance information in the taskbar window, with balance change history support.
 
-## 编译
+English | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [Deutsch](README.de.md) | [עברית](README.he.md) | [Magyar](README.hu.md) | [Italiano](README.it.md) | [Polski](README.pl.md) | [Português (Brasil)](README.pt-BR.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md)
 
-### 环境要求
+## Features
 
-- Visual Studio 2026（v145 工具集）
-- Windows 10 SDK 或更高版本
+- Periodically queries DeepSeek official API for balance
+- Displays balance value and currency in TrafficMonitor's taskbar and main window
+- Balance change history (automatic incremental storage, configurable limit)
+- Multi-language support (auto-detection from system language or manual selection)
+- Configuration file (including API Key) and history encrypted with Windows DPAPI, accessible only by the current Windows user
 
-### 构建
+## Installation
+
+1. Download the appropriate DLL from [Release](https://github.com/KagurazakaYashi/TrafficMonitorPlugin-DeepSeekDeskBand/releases):
+   - x86 TrafficMonitor → `DeepSeekDeskBand.dll`
+   - x64 TrafficMonitor → `DeepSeekDeskBand64.dll`
+2. Copy the DLL to the `plugins` folder under the TrafficMonitor program directory
+3. Restart TrafficMonitor
+4. Right-click on the taskbar empty area, select "Show Settings", and check "DeepSeek Balance Assistant" to display
+
+> **Note**: The DLL must be placed in the `plugins` subfolder; it cannot be loaded from other directories.
+
+## Display Content
+
+The plugin display consists of two parts:
+
+- **Left label text**: Can be modified in TrafficMonitor's "Options" → "Taskbar Window Settings" → "Display Text Settings".
+- **Right value text**: Displays `balance currency`, e.g. `100.00 CNY`. Balance data updates automatically at regular intervals.
+
+In TrafficMonitor's right-click menu under the "Display Items" submenu, the plugin's display name changes with the language setting (e.g. "DeepSeek Balance Assistant" in the English environment).
+
+## Opening the Plugin Configuration Window
+
+Right-click on TrafficMonitor's taskbar window or main window, select "Plugin Management" in the right-click menu, right-click on this plugin and select "Options" to open the configuration dialog. In the configuration dialog, you can set API Key and other options, as well as view history records.
+
+## Configuration Options
+
+### DeepSeek API Key
+
+- Enter your [DeepSeek API Key](https://platform.deepseek.com/api_keys) in the input field
+- The key is displayed in password mask mode (plaintext is not shown)
+- Real-time format validation below the input field: must start with `sk-`, followed by 32 alphanumeric characters
+- Once the format is valid, click the "Test API" button to verify the key
+- After passing the test, a balance details dialog will appear and the OK button becomes enabled
+
+> **You must pass the API test** before clicking OK to save. If the key is empty (no display needed), you can save directly.
+
+### Update Interval (seconds)
+
+- Default: **60** seconds
+- Range: 1 ~ 31536000
+- Automatically queries the DeepSeek API balance every set number of seconds
+- The update interval must be greater than the request timeout, otherwise it cannot be saved
+
+### Request Timeout (seconds)
+
+- Default: **10** seconds
+- Range: 3 ~ 60 seconds
+- Maximum wait time for an API request; exceeding this time is treated as a failed request
+- Adjust based on network conditions; increase if the network is poor
+
+### History Record Count
+
+- Default: **1000** records
+- Range: 0 ~ 10000 (set to 0 to disable history recording)
+- New records are only added when the balance actually changes (difference > 0.001), avoiding redundancy
+- Old records exceeding the limit are automatically purged
+
+### Auto Refresh
+
+- Checked by default
+- When checked, the history list refreshes automatically every second
+- Clicking anywhere on the list cancels auto refresh
+
+### Display Language
+
+- Default is "Auto" (automatically detects based on system language)
+- Supports 12 languages: 简体中文, 繁體中文, 日本語, English, Deutsch, עברית, Magyar, Italiano, Polski, Português (Brasil), Русский, Türkçe
+- Switching languages takes effect immediately in the dialog, but clicking the "OK" button is required for persistent saving
+
+### Clear History
+
+- Click the "Clear History" button and confirm to erase all history records
+- This operation is irreversible
+
+## Build
+
+### Requirements
+
+- Visual Studio 2026 (v145 toolset)
+- Windows 10 SDK or later
+- The `/utf-8` compiler option must be enabled (required for Chinese source code)
+
+### Quick Build (Recommended)
 
 ```batch
 build.bat
 ```
 
-自动编译 x86 和 x64 Release 配置，并将生成的 DLL 复制到 `C:\TrafficMonitor\plugins\`。
+Automatically compiles the Release configuration based on the current system architecture and copies the generated DLL to `C:\TrafficMonitor\plugins\`.
 
-也可手动使用 MSBuild：
+> **Note**: Modify the `PLUGINDIR` variable in `build.bat` according to the actual installation path of TrafficMonitor.
+
+### Manual Build
 
 ```batch
 MSBuild DeepSeekDeskBand.sln /t:Rebuild /p:Configuration=Release /p:Platform=x86
 MSBuild DeepSeekDeskBand.sln /t:Rebuild /p:Configuration=Release /p:Platform=x64
 ```
 
-### 输出
+### Output Files
 
-| 平台 | 输出文件 |
-|------|----------|
-| x86  | `Release\DeepSeekDeskBand.dll` |
-| x64  | `x64\Release\DeepSeekDeskBand64.dll` |
+| Platform | Configuration | Output File                          |
+|----------|---------------|--------------------------------------|
+| x86      | Debug         | `Debug\DeepSeekDeskBand.dll`         |
+| x86      | Release       | `Release\DeepSeekDeskBand.dll`       |
+| x64      | Debug         | `x64\Debug\DeepSeekDeskBand64.dll`   |
+| x64      | Release       | `x64\Release\DeepSeekDeskBand64.dll` |
 
-## 安装
+## Privacy & Data Security
 
-1. 将对应版本的 DLL 复制到 TrafficMonitor 程序目录下的 `plugins` 文件夹
-2. 重启 TrafficMonitor
-3. 在任务栏右键菜单中选择"显示设置"，勾选"DeepSeekDeskBand"即可显示
+This plugin takes user privacy and data security seriously:
 
-> x86 版 TrafficMonitor 使用 `DeepSeekDeskBand.dll`，x64 版使用 `DeepSeekDeskBand64.dll`。
+- **API Key**: Encrypted and stored locally using Windows DPAPI in `DeepSeekDeskBand.dat`, accessible and decryptable only by the current Windows user. The key is never uploaded to any third party.
+- **Balance Data**: Retrieved solely via HTTPS from the DeepSeek official API (`api.deepseek.com`), without passing through any intermediate servers.
+- **History Records**: Balance change records are encrypted and stored locally using DPAPI in `DeepSeekDeskBand_History.dat`, accessible only by the current Windows user.
+- **Network Requests**: Only HTTPS requests are sent to `api.deepseek.com` (Authorization: Bearer Token); no other domains are contacted.
+- **No Data Collection**: This plugin does not collect or upload any user data or usage statistics.
+- **Icon Cache**: The icon (favicon.ico) is downloaded from `www.deepseek.com` only once when the settings dialog is opened for the first time, and cached in the plugin configuration directory.
 
-## 技术说明
+## Technical Notes
 
-- 插件接口：TrafficMonitor API v7
-- 无 MFC 依赖，纯 Win32 C++ 实现
-- 采用单例模式管理插件实例
+- Plugin Interface: TrafficMonitor API v7
+- No MFC dependency, pure Win32 C++ implementation
+- Singleton pattern for plugin instance management
+- WinHTTP HTTPS client
+- Balance change detection threshold > 0.001 to reduce redundant records
 
-## 许可证
+## License
 
-```LICENSE
-Copyright (c) 2026 KagurazakaYashi(KagurazakaMiyabi)
-TrafficMonitorPlugin-DeepSeekDeskBand is licensed under Mulan PSL v2.
-You can use this software according to the terms and conditions of the Mulan PSL v2.
-You may obtain a copy of Mulan PSL v2 at:
-         http://license.coscl.org.cn/MulanPSL2
-THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details.
-```
+Copyright (c) 2026 KagurazakaYashi (KagurazakaMiyabi)
+
+This project is open-sourced under the Mulan PSL v2 license. You may use this software in compliance with the terms of Mulan PSL v2. A copy of the license can be found at: http://license.coscl.org.cn/MulanPSL2
+
+This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement.

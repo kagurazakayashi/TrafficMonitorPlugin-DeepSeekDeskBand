@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsTrTR[] = {
-    /* ITEM_NAME            */ L"DeepSeek Asistanı",
+    /* ITEM_NAME            */ L"DeepSeek Bakiye Asistanı",
     /* COMMAND_NAME         */ L"DeepSeek Bakiye Asistanı",
-    /* PLUGIN_DESCRIPTION   */ L"DeepSeek DeskBand Eklentisi",
+    /* PLUGIN_DESCRIPTION   */ L"TrafficMonitor görev çubuğu penceresinde DeepSeek bakiye bilgilerini görüntüler, bakiye değişim geçmişi kaydı ile.",
+    /* PLUGIN_AUTHOR        */ L"KagurazakaYashi(Miyabi)",
     /* DLG_TITLE            */ L"DeepSeek Ayarları",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"Geçersiz anahtar formatı: sk- ile başlamalı ve 32 küçük harf ve rakam içermelidir",

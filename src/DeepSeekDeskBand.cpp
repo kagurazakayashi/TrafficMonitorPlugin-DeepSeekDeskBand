@@ -304,18 +304,18 @@ const wchar_t* CDeepSeekDeskBand::GetInfo(PluginInfoIndex index)
 {
     switch (index)
     {
-    case TMI_NAME:          // 插件名称
-        return DSDB_NAME;
+    case TMI_NAME:          // 插件名称（使用显示项目名称，保持多语言一致）
+        return Strings_Get(StringKey::ITEM_NAME);
     case TMI_DESCRIPTION:   // 插件功能描述（本地化）
         return Strings_Get(StringKey::PLUGIN_DESCRIPTION);
-    case TMI_AUTHOR:        // 作者
-        return DSDB_AUTHOR;
-    case TMI_COPYRIGHT:     // 版权信息
-        return L"";
+    case TMI_AUTHOR:        // 作者（本地化：中文/日文=神楽坂雅詩，其他=KagurazakaYashi(Miyabi)）
+        return Strings_Get(StringKey::PLUGIN_AUTHOR);
+    case TMI_COPYRIGHT:     // 版权信息（固定英文）
+        return L"Copyright (c) 2026 KagurazakaYashi(KagurazakaMiyabi), licensed under Mulan PSL v2.";
     case TMI_VERSION:       // 版本号
         return DSDB_VERSION;
     case TMI_URL:           // 项目主页
-        return L"";
+        return L"https://github.com/kagurazakayashi/TrafficMonitorPlugin-DeepSeekDeskBand";
     default:
         break;
     }

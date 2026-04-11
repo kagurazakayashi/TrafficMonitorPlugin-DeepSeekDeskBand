@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsItIT[] = {
-    /* ITEM_NAME            */ L"Assistente DeepSeek",
+    /* ITEM_NAME            */ L"Assistente Saldo DeepSeek",
     /* COMMAND_NAME         */ L"Assistente Saldo DeepSeek",
-    /* PLUGIN_DESCRIPTION   */ L"Plugin DeepSeek DeskBand",
+    /* PLUGIN_DESCRIPTION   */ L"Mostra le informazioni sul saldo DeepSeek nella finestra della barra delle applicazioni di TrafficMonitor, con cronologia delle variazioni del saldo.",
+    /* PLUGIN_AUTHOR        */ L"KagurazakaYashi(Miyabi)",
     /* DLG_TITLE            */ L"Impostazioni DeepSeek",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"Formato chiave non valido: deve iniziare con sk- seguito da 32 lettere minuscole e cifre",

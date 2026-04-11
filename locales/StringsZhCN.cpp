@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsZhCN[] = {
-    /* ITEM_NAME            */ L"DeepSeek 助手",
-    /* COMMAND_NAME         */ L"DeepSeek余额助手",
-    /* PLUGIN_DESCRIPTION   */ L"DeepSeek 桌面助手插件",
+    /* ITEM_NAME            */ L"DeepSeek 余额助手",
+    /* COMMAND_NAME         */ L"DeepSeek 余额助手",
+    /* PLUGIN_DESCRIPTION   */ L"在 TrafficMonitor 的任务栏窗口中显示 DeepSeek 官网余额信息，支持记录余额变化历史。",
+    /* PLUGIN_AUTHOR        */ L"神楽坂雅詩",
     /* DLG_TITLE            */ L"DeepSeek 设置",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"密钥格式错误：必须以 sk- 开头，后跟32位小写字母和数字",

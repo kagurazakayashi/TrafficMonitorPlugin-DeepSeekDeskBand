@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsEnUS[] = {
-    /* ITEM_NAME            */ L"DeepSeek Assistant",
+    /* ITEM_NAME            */ L"DeepSeek Balance Assistant",
     /* COMMAND_NAME         */ L"DeepSeek Balance Assistant",
-    /* PLUGIN_DESCRIPTION   */ L"DeepSeek DeskBand Plugin",
+    /* PLUGIN_DESCRIPTION   */ L"Displays DeepSeek balance information in the TrafficMonitor taskbar window, with balance change history tracking.",
+    /* PLUGIN_AUTHOR        */ L"KagurazakaYashi(Miyabi)",
     /* DLG_TITLE            */ L"DeepSeek Settings",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"Invalid key format: must start with sk- followed by 32 lowercase letters and digits",

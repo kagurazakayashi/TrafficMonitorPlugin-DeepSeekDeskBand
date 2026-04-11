@@ -514,8 +514,8 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             RefreshHistoryList(hList, pData->historyRecords);
         }
 
-        // --- 启动历史刷新定时器（1 秒间隔） ---
-        SetTimer(hWnd, 1, 1000, nullptr);
+        // --- 启动历史刷新定时器（与 API 更新间隔同步） ---
+        SetTimer(hWnd, 1, pData->updateInterval * 1000, nullptr);
 
         // --- "确定(&O)" 按钮 ---
         hChild = CreateWindowW(L"BUTTON", Strings_Get(StringKey::DLG_BTN_OK),
@@ -649,6 +649,16 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 GetDlgItemTextW(hWnd, IDC_EDIT_API_KEY, buf, DSDB_BUF_APIKEY);
                 bool apiValid = IsValidApiKey(buf);
                 UpdateApiDependentControls(hWnd, buf[0] != L'\0', apiValid, pData->apiTested);
+
+                // 随间隔变更同步调整历史刷新定时器
+                wchar_t bufInterval[DSDB_BUF_NUMBER];
+                GetDlgItemTextW(hWnd, IDC_EDIT_INTERVAL, bufInterval, DSDB_BUF_NUMBER);
+                int interval = _wtoi(bufInterval);
+                if (interval > 0)
+                {
+                    KillTimer(hWnd, 1);
+                    SetTimer(hWnd, 1, interval * 1000, nullptr);
+                }
             }
             break;
 

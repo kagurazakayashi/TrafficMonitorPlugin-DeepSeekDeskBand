@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsRuRU[] = {
-    /* ITEM_NAME            */ L"DeepSeek Ассистент",
+    /* ITEM_NAME            */ L"Ассистент баланса DeepSeek",
     /* COMMAND_NAME         */ L"Ассистент баланса DeepSeek",
-    /* PLUGIN_DESCRIPTION   */ L"Плагин DeepSeek DeskBand",
+    /* PLUGIN_DESCRIPTION   */ L"Отображает информацию о балансе DeepSeek в окне панели задач TrafficMonitor с историей изменений баланса.",
+    /* PLUGIN_AUTHOR        */ L"KagurazakaYashi(Miyabi)",
     /* DLG_TITLE            */ L"Настройки DeepSeek",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"Неверный формат ключа: должен начинаться с sk- и содержать 32 строчные буквы и цифры",

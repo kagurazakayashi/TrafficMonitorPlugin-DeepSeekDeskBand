@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsPtBR[] = {
-    /* ITEM_NAME            */ L"Assistente DeepSeek",
+    /* ITEM_NAME            */ L"Assistente de Saldo DeepSeek",
     /* COMMAND_NAME         */ L"Assistente de Saldo DeepSeek",
-    /* PLUGIN_DESCRIPTION   */ L"Plugin DeepSeek DeskBand",
+    /* PLUGIN_DESCRIPTION   */ L"Exibe informações de saldo do DeepSeek na janela da barra de tarefas do TrafficMonitor, com histórico de alterações de saldo.",
+    /* PLUGIN_AUTHOR        */ L"KagurazakaYashi(Miyabi)",
     /* DLG_TITLE            */ L"Configurações do DeepSeek",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"Formato de chave inválido: deve começar com sk- seguido por 32 letras minúsculas e dígitos",

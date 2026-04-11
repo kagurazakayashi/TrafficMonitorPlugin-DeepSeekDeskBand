@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsHuHU[] = {
-    /* ITEM_NAME            */ L"DeepSeek Asszisztens",
+    /* ITEM_NAME            */ L"DeepSeek Egyenleg Asszisztens",
     /* COMMAND_NAME         */ L"DeepSeek Egyenleg Asszisztens",
-    /* PLUGIN_DESCRIPTION   */ L"DeepSeek DeskBand bővítmény",
+    /* PLUGIN_DESCRIPTION   */ L"Megjeleníti a DeepSeek egyenleginformációit a TrafficMonitor tálcaablakában, egyenlegváltozási előzményekkel.",
+    /* PLUGIN_AUTHOR        */ L"KagurazakaYashi(Miyabi)",
     /* DLG_TITLE            */ L"DeepSeek Beállítások",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"Érvénytelen kulcsformátum: sk- kezdetű, majd 32 kisbetű és számjegy szükséges",

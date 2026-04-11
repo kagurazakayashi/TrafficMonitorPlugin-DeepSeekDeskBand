@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsHeIL[] = {
-    /* ITEM_NAME            */ L"DeepSeek עוזר",
-    /* COMMAND_NAME         */ L"עוזר יתרת DeepSeek",
-    /* PLUGIN_DESCRIPTION   */ L"תוסף DeepSeek DeskBand",
+    /* ITEM_NAME            */ L"DeepSeek עוזר יתרה",
+    /* COMMAND_NAME         */ L"DeepSeek עוזר יתרה",
+    /* PLUGIN_DESCRIPTION   */ L"מציג מידע על יתרת DeepSeek בחלון שורת המשימות של TrafficMonitor, עם מעקב אחר היסטוריית שינויים ביתרה.",
+    /* PLUGIN_AUTHOR        */ L"KagurazakaYashi(Miyabi)",
     /* DLG_TITLE            */ L"הגדרות DeepSeek",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"פורמט מפתח לא חוקי: חייב להתחיל ב-sk- ואחריו 32 אותיות קטנות וספרות",

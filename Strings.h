@@ -30,13 +30,14 @@ enum class Language
 enum class StringKey
 {
     // ---- 显示项目 ----
-    ITEM_NAME,              ///< 右键菜单显示项目名称
+    ITEM_NAME,              ///< 显示项目名称（右键菜单 + 插件信息）
 
     // ---- 右键菜单命令 ----
     COMMAND_NAME,           ///< 右键菜单项名称
 
-    // ---- 插件描述 ----
+    // ---- 插件信息 ----
     PLUGIN_DESCRIPTION,     ///< 插件功能描述
+    PLUGIN_AUTHOR,          ///< 插件作者名称（多语言）
 
     // ---- 设置对话框 ----
     DLG_TITLE,              ///< 窗口标题

@@ -103,16 +103,16 @@
 // ============================================================
 
 /** @brief 插件版本号字符串 */
-#define DSDB_VERSION                L"1.0"
+#define DSDB_VERSION                L"1.1"
 
-/** @brief 插件名称 */
-#define DSDB_NAME                   L"DeepSeekDeskBand"
+/** @brief 插件名称（非本地化，用于内部标识） */
+#define DSDB_NAME                   L"DeepSeek 余额助手"
 
-/** @brief 插件描述 */
-#define DSDB_DESCRIPTION            L"DeepSeek 桌面助手插件"
+/** @brief 插件描述（已改为多语言，此宏保留用于未本地化场景） */
+#define DSDB_DESCRIPTION            L"在 TrafficMonitor 的任务栏窗口中显示 DeepSeek 官网余额信息"
 
-/** @brief 插件作者 */
-#define DSDB_AUTHOR                 L"yashi"
+/** @brief 插件作者（非本地化，用于 version.rc 等） */
+#define DSDB_AUTHOR                 L"KagurazakaYashi(Miyabi)"
 
 // ============================================================
 // AES-256 加密密钥（编译时常量，126 字符，不超 CHAR_MAX）

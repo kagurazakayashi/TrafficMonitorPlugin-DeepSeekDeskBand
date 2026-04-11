@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsDeDE[] = {
-    /* ITEM_NAME            */ L"DeepSeek-Assistent",
+    /* ITEM_NAME            */ L"DeepSeek-Guthabenassistent",
     /* COMMAND_NAME         */ L"DeepSeek-Guthabenassistent",
-    /* PLUGIN_DESCRIPTION   */ L"DeepSeek DeskBand-Plugin",
+    /* PLUGIN_DESCRIPTION   */ L"Zeigt DeepSeek-Guthabeninformationen im TrafficMonitor-Taskleistenfenster an, mit Guthabenverlaufsprotokollierung.",
+    /* PLUGIN_AUTHOR        */ L"KagurazakaYashi(Miyabi)",
     /* DLG_TITLE            */ L"DeepSeek-Einstellungen",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"Ungültiges Schlüsselformat: muss mit sk- beginnen, gefolgt von 32 Kleinbuchstaben und Ziffern",

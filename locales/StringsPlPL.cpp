@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsPlPL[] = {
-    /* ITEM_NAME            */ L"Asystent DeepSeek",
+    /* ITEM_NAME            */ L"Asystent salda DeepSeek",
     /* COMMAND_NAME         */ L"Asystent salda DeepSeek",
-    /* PLUGIN_DESCRIPTION   */ L"Wtyczka DeepSeek DeskBand",
+    /* PLUGIN_DESCRIPTION   */ L"Wyświetla informacje o saldzie DeepSeek w oknie paska zadań TrafficMonitor, z historią zmian salda.",
+    /* PLUGIN_AUTHOR        */ L"KagurazakaYashi(Miyabi)",
     /* DLG_TITLE            */ L"Ustawienia DeepSeek",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"Nieprawidłowy format klucza: musi zaczynać się od sk- i zawierać 32 małe litery i cyfry",

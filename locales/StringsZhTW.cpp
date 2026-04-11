@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsZhTW[] = {
-    /* ITEM_NAME            */ L"DeepSeek 助手",
-    /* COMMAND_NAME         */ L"DeepSeek餘額助手",
-    /* PLUGIN_DESCRIPTION   */ L"DeepSeek 桌面助手外掛程式",
+    /* ITEM_NAME            */ L"DeepSeek 餘額助手",
+    /* COMMAND_NAME         */ L"DeepSeek 餘額助手",
+    /* PLUGIN_DESCRIPTION   */ L"在 TrafficMonitor 的工作列視窗中顯示 DeepSeek 官網餘額資訊，支援記錄餘額變化歷史。",
+    /* PLUGIN_AUTHOR        */ L"神楽坂雅詩",
     /* DLG_TITLE            */ L"DeepSeek 設定",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"金鑰格式錯誤：必須以 sk- 開頭，後接32位小寫字母和數字",

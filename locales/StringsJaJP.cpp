@@ -6,9 +6,10 @@
 #include "Strings.h"
 
 const wchar_t* kStringsJaJP[] = {
-    /* ITEM_NAME            */ L"DeepSeek アシスタント",
-    /* COMMAND_NAME         */ L"DeepSeek残高アシスタント",
-    /* PLUGIN_DESCRIPTION   */ L"DeepSeek デスクトップアシスタントプラグイン",
+    /* ITEM_NAME            */ L"DeepSeek 残高アシスタント",
+    /* COMMAND_NAME         */ L"DeepSeek 残高アシスタント",
+    /* PLUGIN_DESCRIPTION   */ L"TrafficMonitor のタスクバーウィンドウに DeepSeek 公式サイトの残高情報を表示し、残高の変化履歴を記録できます。",
+    /* PLUGIN_AUTHOR        */ L"神楽坂雅詩",
     /* DLG_TITLE            */ L"DeepSeek 設定",
     /* DLG_API_LABEL        */ L"DeepSeek API:",
     /* DLG_API_HINT         */ L"APIキー形式エラー：sk-で始まり32桁の小文字英数字が必要です",
